@@ -12,7 +12,7 @@
   coeffCols: ["a","b","c","d","e","f","g","h","i","j","k","l","m",
               "n","o","p","q","r","s","t","u","v","w","x","y","z"]
 
-  readAll(hisFormulaB)
+  readAll(hisFormula)
   .each(r => coeffCols.each(
     c => if (r[c]==calculatedPointRef)
            depth= [depth, hisFormulaDepth(r->calculatedPointRef)+1].fold(max)))
