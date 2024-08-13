@@ -1,0 +1,249 @@
+/*------------------------------------------------------------------------------
+Haxall and Haystack Data Analysis for Building Operations (Data Analysis for
+Operations) Copyright (c) 2023, The Regents of the University of California,
+through Lawrence Berkeley National Laboratory (subject to receipt of any
+required approvals from the U.S. Dept. of Energy). All rights reserved.
+
+If you have questions about your rights to use or distribute this software,
+please contact Berkeley Lab's Intellectual Property Office at
+IPO@lbl.gov.
+
+NOTICE.  This Software was developed under funding from the U.S. Department of
+Energy and the U.S. Government consequently retains certain rights.  As such,
+the U.S. Government has been granted for itself and others acting on its behalf
+a paid-up, nonexclusive, irrevocable, worldwide license in the Software to
+reproduce, distribute copies to the public, prepare derivative works, and 
+perform publicly and display publicly, and to permit others to do so.
+------------------------------------------------------------------------------*/
+/*------------------------------------------------------------------------------
+  For a calculated point associated with a formula, load required trends and
+  perform calculations, then return resulting calculated trend as a hisGrid.
+
+  Arguments:
+  ptId     Ref<point>, id of calculated point, must have an associated formula
+  span     Span to perform calculation on
+  limit    Limit number of measurements, used in xqHisRead
+  debug    Bool, if true return underlying trends and intermediary calcs
+------------------------------------------------------------------------------*/
+
+(ptId, span, limit:1000000, debug:false) => do
+  /*----------------------------------------------------------------------------
+  // Process inputs
+  ----------------------------------------------------------------------------*/
+  // Normalize to record
+  rec: if (isRef(ptId)) readById(ptId) else ptId
+  
+  // Load params from target point record
+  hisInterval: if (rec.has("hisInterval")) rec->hisInterval else 15min
+  hisMissingVals: if (rec.has("hisMissingVals")) rec->hisMissingVals
+                  else "hide"
+  
+  // Determine target unit
+  tUnit: rec->unit
+
+  // Normalize span to DateTime span
+  span= span.toSpan
+
+  /*----------------------------------------------------------------------------
+  // Split span as needed based on overlap with formulas
+  ----------------------------------------------------------------------------*/
+  // Query formulas that overlap span
+  hisFormulaRecs: readAll(
+    hisFormulaB and calculatedPointRef==rec->id
+    and startDateTime <= span.end
+    and (not endDateTime or endDateTime >= span.start))
+
+  // Split query span between formulas. Note that overlap between formulas is
+  // allowed and will be managed later by averaging results
+  hisFormulaRecs= hisFormulaRecs
+  .addCol("span", hisFormulaRec => do
+    s: if (hisFormulaRec->startDateTime >= span.start)
+         hisFormulaRec->startDateTime
+       else span.start
+    e: if (hisFormulaRec.has("endDateTime")
+           and hisFormulaRec->endDateTime <= span.end)
+         hisFormulaRec->endDateTime
+       else span.end
+    s..e
+  end)
+  // Sort by startDateTime
+  .sort((a,b) => a->startDateTime <=> b->startDateTime)
+
+  // Exit if there is no overlap between queried span and formulas
+  if (isEmpty(hisFormulaRecs)) throw "No formula found for queried span"
+
+  /*----------------------------------------------------------------------------
+  // Cycle through each formula and span, query history, apply formula
+  ----------------------------------------------------------------------------*/
+  // Prepare list of coefficient names
+  coeffCols: ["a","b","c","d","e","f","g","h","i","j","k","l","m",
+              "n","o","p","q","r","s","t","u","v","w","x","y","z"]
+              
+  // Initialize list of hisGrids (one hisGrid per formula)
+  hisGrids: []
+  
+  // Begin cycle through formulas
+  hisFormulaRecs.each(hisFormulaRec => do
+
+    // Create formula function
+    formulaStr: hisFormulaRec->hisFormulaB
+    defcompStr:
+    """defcomp
+         a: {defVal:null}
+         b: {defVal:null}
+         c: {defVal:null}
+         d: {defVal:null}
+         e: {defVal:null}
+         f: {defVal:null}
+         g: {defVal:null}
+         h: {defVal:null}
+         i: {defVal:null}
+         j: {defVal:null}
+         k: {defVal:null}
+         l: {defVal:null}
+         m: {defVal:null}
+         n: {defVal:null}
+         o: {defVal:null}
+         p: {defVal:null}
+         q: {defVal:null}
+         r: {defVal:null}
+         s: {defVal:null}
+         t: {defVal:null}
+         u: {defVal:null}
+         v: {defVal:null}
+         w: {defVal:null}
+         x: {defVal:null}
+         y: {defVal:null}
+         z: {defVal:null}
+         out: {}
+         do
+           out = """ + formulaStr +
+    """  end
+       end"""
+    formulaFunc: eval(defcompStr)
+
+    // Further split formula record's span if required (maxSpanIncrement)
+    spans: []
+    formulaSpan: hisFormulaRec->span
+    spanStart: formulaSpan.start()
+    spanEnd: formulaSpan.end()
+    spanDuration: (spanEnd - spanStart).to(1hr)
+    maxSpanIncrement: try hisFormulaRec->maxSpanIncrement.to(1hr) catch null
+    if (maxSpanIncrement==24hr and spanDuration > maxSpanIncrement) do
+      formulaSpan.eachDay(spanDay => do
+        chunkStart: maxDatetime(spanDay.toSpan.start(), spanStart)
+        chunkEnd: minDatetime(spanDay.toSpan.end(), spanEnd)
+        spans= spans.add(chunkStart..chunkEnd)
+      end)
+    else if (maxSpanIncrement != null and spanDuration > maxSpanIncrement) do
+      increments: ceil(spanDuration / maxSpanIncrement).as(1)
+      (0..increments-1).each(i => do
+        chunkStart: spanStart + i * maxSpanIncrement
+        chunkEnd: spanStart + (i+1) * maxSpanIncrement
+        spans= spans.add(chunkStart..chunkEnd)
+      end)
+    else spans= spans.add(hisFormulaRec->span)
+    
+    // Cycle through spans
+    spans.each(chunk => do
+  
+      // Initialize query of required histories
+      sourceQ: xq()
+               .xqReadByIds(hisFormulaRec
+                            .findAll((v,k) => coeffCols.contains(k) and v!=null)
+                            .vals)
+               .xqHisRead(chunk, {limit:limit})
+
+      // Perform rollup in cluster query to reduce unnecessary transfer of data
+      hisGrid: sourceQ
+      .xqHisRollupAuto(hisInterval)
+      .xqExecute()
+      // Temporary: using hisRollupAuto instead of xqHisRollupAuto
+      // to specify interval
+      //.hisRollupAuto(hisInterval)
+      // Clip to exact span to limit overlap between multiple formulas
+      //.hisClip
+    
+      // Exit if empty history grid
+      if (isEmpty(hisGrid)) return null
+    
+      // Throw exception if not all data could be loaded due to limit
+      if (hisGrid.meta.has("more"))
+        throw "Data limit exceeded: " + limit.format("#,###") + " readings. "
+              + "Use shorter span, shorter maxSpanIncrement, or higher limit."
+    
+      // Rename hisGrid columns to match formula
+      coeffCols.each(coeffCol => do
+        colName: hisGrid
+        .colNames
+        .find(colName =>
+          hisFormulaRec[coeffCol] != null and
+          hisGrid.col(colName).meta["id"] == hisFormulaRec[coeffCol],
+          false)
+        if (colName != null) hisGrid= hisGrid.renameCol(colName, coeffCol)
+        if (colName != null and debug)
+          hisGrid= hisGrid
+          .addColMeta(coeffCol,
+            {dis: coeffCol + " : " + hisGrid.col(coeffCol).meta.dis()})
+      end)
+
+      // Row by row, process history grid of source points and apply formula
+      hisGrid= hisGrid
+      .addCol("val", row => try formulaFunc(row)["out"].to(tUnit)
+                            catch na())
+      // Clip to remove values outside of chunk
+      .hisClip
+
+      // Debug path
+      if (debug) do
+        // Apply metadata to "val" col to show results on separate chart
+        hisGrid= hisGrid
+        .addColMeta("val",
+                    {dis:rec.dis(), chartGroup:"output",
+                     chunkStart: chunk.start, chunkEnd:chunk.end})
+      // Regular path (not debug)
+      end else do
+        hisGrid= hisGrid
+        // Keep only ts and val columns
+        .keepCols(["ts","val"])
+      end
+
+      // Add hisGrid to collection of hisGrids
+      hisGrids= hisGrids
+      .add(hisGrid)
+    end)  // each chunk
+  end)    // each hisFormulaRec
+  
+  /*----------------------------------------------------------------------------
+  // Combine computed histories from several formulas
+  ----------------------------------------------------------------------------*/
+  if (isEmpty(hisGrids)) return hisGrids
+  
+  combinedHisGrid: if (debug) return hisJoin(hisGrids)
+                                     .hisMap(v => if(v==null) na() else v)
+                   else hisJoin(hisGrids)
+                        .addMeta({hisLimit:999999999})
+                        .hisFoldCols(avg)
+
+  // Replace null values with NA if hisMissingVals is "show"
+  if (hisMissingVals=="show")
+    combinedHisGrid= combinedHisGrid
+    .hisMap(v => if(v==null) na() else v)
+  
+  // Remove any calculated history in the future
+  combinedHisGrid= combinedHisGrid.findAll(row => row->ts<=now())
+end
+
+/*------------------------------------------------------------------------------
+  Updates
+  2024-08-08  Raphael Vitti
+    Added hisClip back in, but later in the code, after applying formulaFunc.
+    Removing hisClip caused more issues, specifically in the case of 50B CHW
+    Plant Output Load Power, where the fomula calculated 0 instead of null
+    outside of chunk.
+  2023-07-31  Raphael Vitti
+    Removed hisClip to avoid empty periods when span and hisInterval don't line
+    up, e.g. rollup of 1hr on a span that starts and ends on 00:00:01.
+  2021-09-22  Raphael Vitti
+    Created.
+------------------------------------------------------------------------------*/
