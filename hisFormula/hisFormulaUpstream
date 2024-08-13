@@ -1,0 +1,37 @@
+/*------------------------------------------------------------------------------
+  Return a list of calculated points a given calculated point is downstream of.
+  In other words, returns the list of calculated points which values are needed
+  to calculate values for the given calculated point.
+  Recursive.
+  
+  Arguments: 
+  calculatedPointRef     Id of calculated point, calculated from hisFormula
+  dependents             List of ids, upstream calculated points
+------------------------------------------------------------------------------*/
+
+(calculatedPointRef, upstream:[]) => do
+  coeffCols: ["a","b","c","d","e","f","g","h","i","j","k","l","m",
+              "n","o","p","q","r","s","t","u","v","w","x","y","z"]
+  
+  // If calculatedPointRef has a corresponding formula, it is indeed a 
+  // calculated point and can be added to the upstream list
+  if (read(hisFormulaB and calculatedPointRef==calculatedPointRef, false)!=null)
+    upstream= upstream
+    .add(calculatedPointRef)
+  
+  // Identify all formulas for calculatedPointRef and recursively process
+  // each coefficient
+  readAll(hisFormulaB and calculatedPointRef==calculatedPointRef)
+  .each(r => coeffCols.each(c =>
+    if (isRef(r[c]))
+      upstream= upstream
+      .addAll(hisFormulaUpstream(r[c]))))
+  
+  upstream.unique()
+end
+
+/*------------------------------------------------------------------------------
+  Updates
+  2022-10-31  Raphael Vitti
+    Created.
+------------------------------------------------------------------------------*/
