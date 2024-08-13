@@ -1,0 +1,30 @@
+/*------------------------------------------------------------------------------
+  Trash selected records. Also trash associated calculated points.
+  
+  Arguments:
+  refs        List of ids of selected records to trash
+------------------------------------------------------------------------------*/
+
+(refs) => do
+  // Normalize action input
+  refs= actionNormInput(refs, "ids")
+  recs: readByIds(refs)
+  
+  // Extract list of unique calculatedPointRefs, remove potential nulls
+  calculatedPointRefs: recs
+  .colToList("calculatedPointRef")
+  .unique()
+  .findAll(r => isRef(r) and (try isDict(readById(r)) catch false))
+  
+  // Trash selected hisFormula records
+  refs.recTrash()
+
+  // Trash associated calculated points
+  if (not(isEmpty(calculatedPointRefs))) calculatedPointRefs.recTrash()
+end
+
+/*------------------------------------------------------------------------------
+  Updates
+  2022-08-15  Raphael Vitti
+    Created.
+------------------------------------------------------------------------------*/
