@@ -1,0 +1,37 @@
+/*------------------------------------------------------------------------------
+  Return a list of non-calculated points which values are needed to calculate 
+  values for the given calculated point.
+  Recursive.
+  
+  Arguments: 
+  pointRef           Id of calculated point, calculated from hisFormula
+  ts                 Timestamp to determine active formula(s)
+  inputs             List of ids, input points
+------------------------------------------------------------------------------*/
+
+(pointRef, ts:now(), inputs:[]) => do
+  coeffCols: ["a","b","c","d","e","f","g","h","i","j","k","l","m",
+              "n","o","p","q","r","s","t","u","v","w","x","y","z"]
+  
+  // If pointRef does not have a corresponding formula, it is an input 
+  // and can be added to the upstream list
+  if (read(hisFormulaB and calculatedPointRef==pointRef, false)==null)
+    inputs= inputs
+    .add(pointRef)
+  
+  // Identify all formulas for pointRef and recursively process each coefficient
+  readAll(hisFormulaB and calculatedPointRef==pointRef and startDateTime <= ts
+          and (not endDateTime or endDateTime > ts))
+  .each(r => coeffCols.each(c =>
+    if (isRef(r[c]))
+      inputs= inputs
+      .addAll(hisFormulaInputs(r[c], ts))))
+  
+  inputs.unique()
+end
+
+/*------------------------------------------------------------------------------
+  Updates
+  2023-07-27  Raphael Vitti
+    Created.
+------------------------------------------------------------------------------*/
