@@ -1,0 +1,89 @@
+/*------------------------------------------------------------------------------
+  Display input trends used to calculate the given calculated point's values
+  over the given span. The beginning timestamp of the span is used to determine
+  the active formula(s) to use.
+  
+  Arguments: 
+  calculatedPointRef     Id of calculated point, calculated from hisFormula
+  span                   Span used for analysis
+  limit                  Number, limit for hisRead operations
+------------------------------------------------------------------------------*/
+
+(calculatedPointRef, span:lastMonth(), limit:1000000) => do
+  // Normalize span to datetime-span
+  span= span.toSpan
+  
+  // Load point info to determine calculation interval
+  hisInterval: readById(calculatedPointRef)->hisInterval
+  
+  // Retrieve all input points needed to calculate target point values
+  inputPointRefs: hisFormulaInputs(calculatedPointRef, span.toSpan.start)
+  
+  // Load input data
+  hisGrid: xq()
+  .xqReadByIds(inputPointRefs.add(calculatedPointRef))
+  .xqHisRead(span, {limit: limit})
+  .xqHisRollupAuto(hisInterval)
+  .xqExecute()
+  
+  // Highlight gaps
+  hisGrid= hisGrid
+  .toolHisGridShowGaps(hisInterval)
+  
+  // Length of span
+  l: (span.end - span.start).to("s")
+  
+  // Target number of values
+  tCount: floor(l / hisInterval.to("s")).to(1)
+  
+  // Initialize chartGroups
+  chartGroups: []
+  
+  // Calculate uptime per point
+  hisGrid.removeCol("ts").colNames.each(colName => do
+    his: hisGrid.col(colName).meta
+    count: hisGrid.hisClip.colToList(colName).findAll(v => isNumber(v)).size
+    uptime: count / tCount * 100.as("%")
+    chartGroup: uptime+his["unit"]
+    chartGroups= chartGroups.add(chartGroup)
+    hisGrid= hisGrid
+    .addColMeta(colName, {uptime: uptime,
+                          dis: his.dis() + " (" + round(uptime) + ")",
+                          chartGroup: chartGroup})
+  end)
+
+  // Initialize presentation grid for chart
+  presentation: {}.toGrid
+
+  // Order cols by uptime, and put calculatedPoint first
+  calculatedPointCol: hisGrid.removeCol("ts").colNames.find(
+    v => hisGrid.col(v).meta["id"] == calculatedPointRef)
+  orderedCols: hisGrid.removeCol("ts").colNames.sort(
+    (a,b) => hisGrid.col(a).meta->uptime <=> hisGrid.col(b).meta->uptime)
+  orderedCols= orderedCols.moveTo(calculatedPointCol, 0)
+
+  // Fill out presentation grid in order
+  orderedCols.each((colName,i) => do
+    his: hisGrid.col(colName).meta
+    presentation= presentation
+    .addRow(
+    {x:           "ts",
+     y:           his["id"],
+     chartType:   "line",
+     chartGroup:  his["chartGroup"],
+     chartHeight: max(100,
+                      chartGroups.findAll(v => v==his["chartGroup"]).size * 15),
+     dis:         his["dis"],
+     strokeWidth: 2
+    })
+  end)
+  
+  // Return hisGrid
+  hisGrid.addMeta({presentation: presentation})
+end
+
+/*------------------------------------------------------------------------------
+  Updates
+  2023-07-27  Raphael Vitti
+    Created.
+------------------------------------------------------------------------------*/
