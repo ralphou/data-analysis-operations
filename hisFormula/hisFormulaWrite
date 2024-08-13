@@ -22,7 +22,7 @@
   
   // Reject points bound to connectors or with hisFormulaWrite == false
   if (rec.has("connRef") or rec.has("elasticMetric")) return null
-  if (rec.missing("hisFormulaWriteB") or not(rec->hisFormulaWriteB)) return null
+  if (rec.missing("hisFormulaWrite") or not(rec->hisFormulaWrite)) return null
   
   // Load params from target point record
   hisRecalculate: if (rec.has("hisRecalculate")) rec->hisRecalculate else 0s
@@ -59,7 +59,7 @@
   spans.each(chunk => do
 
     // Call hisFormulaCalc
-    try hisGrid: hisFormulaCalcB(rec, chunk)
+    try hisGrid: hisFormulaCalc(rec, chunk)
     catch (ex) do
       rec= commit(diff(rec, {hisErr: ex->dis}, {transient}))
       return null
@@ -84,7 +84,7 @@
 
   // Mark point with information tags
   try do
-    rec= commit(diff(rec, {hisSource: "hisFormulaWriteB"}))
+    rec= commit(diff(rec, {hisSource: "hisFormulaWrite"}))
     rec= commit(diff(rec, {-hisErr}, {transient}))
   catch null
 end
