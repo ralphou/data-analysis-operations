@@ -1,0 +1,99 @@
+/*------------------------------------------------------------------------------
+  Delete stored point history covered by span, recalculate and store.
+  This function calculates history for a virtual point using hisFormula records 
+  with calculatePointRef equal to the target virtual point.
+
+  Arguments:
+  ptId
+  span
+ 
+   Tags:
+  - virtual
+  --- hisFormulaWrite true
+  --- hisInterval
+  --- hisMissingVals (optional) hide / show / ignore
+  --- hisRecalculate (optional)
+------------------------------------------------------------------------------*/
+
+(ptId, span:null) => do
+  // Normalize inputs
+  rec: if (isRef(ptId)) readById(ptId) else ptId
+  if (span!=null) span= span.toSpan()
+  
+  // Reject points bound to connectors or with hisFormulaWrite == false
+  if (rec.has("connRef") or rec.has("elasticMetric")) return null
+  if (rec.missing("hisFormulaWriteB") or not(rec->hisFormulaWriteB)) return null
+  
+  // Load params from target point record
+  hisRecalculate: if (rec.has("hisRecalculate")) rec->hisRecalculate else 0s
+  
+  // If span is not provided, use target record's hisEnd
+  if (span==null)
+    // But if record doesn't have hisEnd, exit
+    if (rec.missing("hisEnd")) return null
+    // hisRecalculate applies to regular updates when span is not provided
+    // Last value at hisEnd will be removed and recalculated in any case
+    else span= (rec->hisEnd - hisRecalculate)..now()
+  // If span is provided, use as is
+  
+  // Erase existing history data, to be replaced
+  rec.hisRemove(span)
+
+  // Split span if required
+  // Max 1 yr at a time to avoid running out of heap space
+  spans: []
+  spanStart: span.start()
+  spanEnd: span.end()
+  spanDuration: (spanEnd - spanStart).to(1hr)
+  maxSpanIncrement: 8760hr
+  if (spanDuration > maxSpanIncrement) do
+    increments: ceil(spanDuration / maxSpanIncrement).as(1)
+    (0..increments-1).each(i => do
+      chunkStart: spanStart + i * maxSpanIncrement
+      chunkEnd: spanStart + (i+1) * maxSpanIncrement
+      spans= spans.add(chunkStart..chunkEnd)
+    end)
+  else spans= spans.add(span)
+
+  // Cycle through spans
+  spans.each(chunk => do
+
+    // Call hisFormulaCalc
+    try hisGrid: hisFormulaCalcB(rec, chunk)
+    catch (ex) do
+      rec= commit(diff(rec, {hisErr: ex->dis}, {transient}))
+      return null
+    end
+
+    // Test for empty or null grid
+    if (hisGrid==null or isEmpty(hisGrid)) return null
+
+    // Filter out null values (can't hisWrite) and filter by
+    // timestamp to avoid duplicating any history point
+    try hisGrid
+        .findAll(row => row.all(v => v!=null)
+                        and row->ts >= span.start()
+                        and row->ts <= span.end()
+                        and row->ts <= now())
+        .hisWrite(rec)
+    catch (ex) do
+      rec= commit(diff(rec, {hisErr: ex->dis}, {transient}))
+      return null
+    end
+  end) // chunk
+
+  // Mark point with information tags
+  try do
+    rec= commit(diff(rec, {hisSource: "hisFormulaWriteB"}))
+    rec= commit(diff(rec, {-hisErr}, {transient}))
+  catch null
+end
+
+/*------------------------------------------------------------------------------
+  Updates
+  2023-07-31  Raphael Vitti
+    Removed "+ 1s" from calculation of span start based on hisEnd, to avoid
+    creating empty periods for hisRollup (e.g. 00:00:00 - 00:00:01 at chunk end)
+  2021-09-22  Raphael Vitti
+    Created from hisFormulaWrite.
+------------------------------------------------------------------------------*/
