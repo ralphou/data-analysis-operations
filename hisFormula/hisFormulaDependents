@@ -1,0 +1,48 @@
+/*------------------------------------------------------------------------------
+  Haxall and Haystack Data Analysis for Building Operations (Data Analysis for
+  Operations) Copyright (c) 2023, The Regents of the University of California,
+  through Lawrence Berkeley National Laboratory (subject to receipt of any
+  required approvals from the U.S. Dept. of Energy). All rights reserved.
+
+  If you have questions about your rights to use or distribute this software,
+  please contact Berkeley Lab's Intellectual Property Office at
+  IPO@lbl.gov.
+
+  NOTICE.  This Software was developed under funding from the U.S. Department
+  of Energy and the U.S. Government consequently retains certain rights.  As 
+  such, the U.S. Government has been granted for itself and others acting on
+  its behalf a paid-up, nonexclusive, irrevocable, worldwide license in the 
+  Software to reproduce, distribute copies to the public, prepare derivative
+  works, and perform publicly and display publicly, and to permit others to do 
+  so.
+------------------------------------------------------------------------------*/
+/*------------------------------------------------------------------------------
+  Return a list of calculated points a given calculated point is upstream of.
+  In other words, returns the list of calculated points which values depend
+  upon values from the given calculated point.
+  Recursive.
+  
+  Arguments: 
+  calculatedPointRef     Id of calculated point, calculated from hisFormula
+  dependents             List of ids, dependent calculated points
+------------------------------------------------------------------------------*/
+
+(calculatedPointRef, dependents:[]) => do
+  coeffCols: ["a","b","c","d","e","f","g","h","i","j","k","l","m",
+              "n","o","p","q","r","s","t","u","v","w","x","y","z"]
+  
+  readAll(hisFormulaB)
+  .each(r => coeffCols.each(
+    c => if (r[c]==calculatedPointRef)
+           dependents= dependents
+           .add(r->calculatedPointRef)
+           .addAll(hisFormulaDependents(r->calculatedPointRef))))
+  
+  dependents.unique()
+end
+
+/*------------------------------------------------------------------------------
+  Updates
+  2021-10-26  Raphael Vitti
+    Created.
+------------------------------------------------------------------------------*/
