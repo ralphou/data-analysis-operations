@@ -1,0 +1,53 @@
+/*------------------------------------------------------------------------------
+  Compilation task for hisFormulaWrite activities, including error management
+  and logging
+------------------------------------------------------------------------------*/
+
+() => do
+  // Log, optional
+  logInfo("taskHisFormulaWriteB", "Starting task")
+  
+  // Find points with hisFormulaWriteB == TRUE
+  targets: readAll(point and his and hisFormulaWriteB==true)
+
+  // Add formula depth and reverse sort so deeper formulas are processed first
+  targets= targets
+  .addCol("depth", target => hisFormulaDepth(target->id))
+  .sortr((a,b) => a->depth <=> b->depth)
+
+  // Cycle through each target point, 
+  targets.each ((target, i) => do
+    taskProgress({percent: round(100%*i/targets.size), cur:target.dis})
+    try do
+      // If point needs backfilling, provide span, else span is null
+      span: if (target.has("hisEnd")) null
+            else do
+              // Use earliest formula start date
+              formulas: readAll(hisFormula and calculatedPointRef==target->id)
+              // Skip point if coefficients are missing a start date
+              if (isEmpty(formulas) or formulas.missing("startDateTime"))
+                return null
+              else
+                // Span goes from first start date until now
+                (formulas.colToList("startDateTime")
+                         .sort((a,b) => a <=> b)
+                         .first
+                 ..now())
+              end
+      // Call external function to write calculated historical data
+      hisFormulaWriteB(target, span)
+      // Block until pending history writes are complete, to ensure downstream
+      // point histories get calculated properly
+      hisSync(1min)
+    end catch (ex) logErr("taskHisFormulaWriteB",
+                          "Failed to update trend for " +
+                          target.dis()+ ": " + ex->dis)
+  end)
+  taskProgress({percent: 100%})
+end
+
+/*------------------------------------------------------------------------------
+  Updates
+  2021-09-22  Raphael Vitti
+    Created from jobHisFormulaWrite.
+------------------------------------------------------------------------------*/
