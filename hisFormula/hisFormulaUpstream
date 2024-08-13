@@ -15,13 +15,13 @@
   
   // If calculatedPointRef has a corresponding formula, it is indeed a 
   // calculated point and can be added to the upstream list
-  if (read(hisFormulaB and calculatedPointRef==calculatedPointRef, false)!=null)
+  if (read(hisFormula and calculatedPointRef==calculatedPointRef, false)!=null)
     upstream= upstream
     .add(calculatedPointRef)
   
   // Identify all formulas for calculatedPointRef and recursively process
   // each coefficient
-  readAll(hisFormulaB and calculatedPointRef==calculatedPointRef)
+  readAll(hisFormula and calculatedPointRef==calculatedPointRef)
   .each(r => coeffCols.each(c =>
     if (isRef(r[c]))
       upstream= upstream
