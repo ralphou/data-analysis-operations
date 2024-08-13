@@ -1,0 +1,35 @@
+/*------------------------------------------------------------------------------
+  Validate hisFormula record, throw error in the following cases:
+  - Start datetime is missing
+  - End datetime is before start datetime
+  
+  Arguments: 
+  rec          Dictionary to validate, should match hisFormula template
+------------------------------------------------------------------------------*/
+
+(rec) => do
+  // Merge with existing in case of edit action
+  recValidation: if (rec.has("id")) merge(readById(rec->id), rec)
+                 else rec
+
+  // startDateTime is required
+  if (recValidation.missing("startDateTime"))
+    throw "startDateTime is required"
+
+  // End must be after start
+  if (recValidation.has("endDateTime")
+      and recValidation->endDateTime != removeMarker()) do
+    startDT: recValidation->startDateTime
+    endDT: recValidation->endDateTime
+    if (startDT > endDT)
+      throw "end needs to be after start"
+  end
+    
+  return rec
+end
+
+/*------------------------------------------------------------------------------
+  Updates
+  2021-09-20  Raphael Vitti
+    Created.
+------------------------------------------------------------------------------*/
