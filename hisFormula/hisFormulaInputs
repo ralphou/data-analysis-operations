@@ -15,12 +15,12 @@
   
   // If pointRef does not have a corresponding formula, it is an input 
   // and can be added to the upstream list
-  if (read(hisFormulaB and calculatedPointRef==pointRef, false)==null)
+  if (read(hisFormula and calculatedPointRef==pointRef, false)==null)
     inputs= inputs
     .add(pointRef)
   
   // Identify all formulas for pointRef and recursively process each coefficient
-  readAll(hisFormulaB and calculatedPointRef==pointRef and startDateTime <= ts
+  readAll(hisFormula and calculatedPointRef==pointRef and startDateTime <= ts
           and (not endDateTime or endDateTime > ts))
   .each(r => coeffCols.each(c =>
     if (isRef(r[c]))
