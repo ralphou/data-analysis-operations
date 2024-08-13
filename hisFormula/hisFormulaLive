@@ -1,0 +1,23 @@
+/*------------------------------------------------------------------------------
+  Wrapper around hisFormulaCalc for use as hisFunc
+  
+  Arguments:
+  *** Typical arguments for hisFunc
+------------------------------------------------------------------------------*/
+
+(rec, dates, opts, yield) => do
+  // Call wrapped function
+  grid: hisFormulaCalc(rec, dates)
+  // Exit if empty or null
+  if(grid==null or isEmpty(grid)) return null
+  // Identify first column
+  colName: grid.removeCol("ts").colNames.first
+  // Yield calculated data
+  grid.each row => yield(row->ts, row[colName])
+end
+
+/*------------------------------------------------------------------------------
+  Updates
+  2021-09-22  Raphael Vitti
+    Created.
+------------------------------------------------------------------------------*/
