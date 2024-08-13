@@ -32,7 +32,7 @@
   ----------------------------------------------------------------------------*/
   // Query formulas that overlap span
   hisFormulaRecs: readAll(
-    hisFormulaB and calculatedPointRef==rec->id
+    hisFormula and calculatedPointRef==rec->id
     and startDateTime <= span.end
     and (not endDateTime or endDateTime >= span.start))
 
@@ -69,7 +69,7 @@
   hisFormulaRecs.each(hisFormulaRec => do
 
     // Create formula function
-    formulaStr: hisFormulaRec->hisFormulaB
+    formulaStr: hisFormulaRec->hisFormula
     defcompStr:
     """defcomp
          a: {defVal:null}
