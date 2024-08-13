@@ -1,0 +1,32 @@
+/*------------------------------------------------------------------------------
+  Edit hisFormula record and set lastModifiedBy tag.
+  
+  Arguments: 
+  hisFormulaDict        Dict for record to edit, should match hisFormula
+                        template and contain id.
+------------------------------------------------------------------------------*/
+
+(hisFormulaDict) => do
+  // Normalize action input
+  rec: actionNormInput(hisFormulaDict, "dict")
+  
+  // Add lastModifiedBy
+  rec= rec
+  .set("lastModifiedBy", userCur()->dis)
+
+  // Remove added info not in template
+  rec= rec
+  .set("debug", null)
+  .set("hisErr", null)
+
+  // Validate record
+  rec= recValidateHisFormula(rec)
+
+  recEdit(rec)
+end
+
+/*------------------------------------------------------------------------------
+  Updates
+  2021-09-21  Raphael Vitti
+    Created.
+------------------------------------------------------------------------------*/
