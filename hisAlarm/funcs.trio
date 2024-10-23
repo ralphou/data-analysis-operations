@@ -1,0 +1,551 @@
+name:anAlarmPeriods
+doc:"For a provided 'alarmConfig' record and a provided span, check trends to determine whether alarm conditions were met."
+func
+src:
+  /*--------------------------------------------------------------------------------------------------
+    For a provided alarmConfig record and a provided span, check trends to determine whether alarm 
+    conditions were met. Return alarm periods. In debug mode, return fomatted trend and periods.
+    
+    If span is not provided, check most recent trends. In this case, testing is done over a period of
+    2 x hisRollupInterval x consecutiveRepeats, to account for lags in history sync and to avoid 
+    prematurely clearing alarms.
+    
+    Arguments:
+    alarmConfig     Alarm config record or id
+    span            Time span for analysis
+    limit           Number used to limit hisRead
+    debug           Bool, if true return trend, single-period results, and additionalCondition 
+  --------------------------------------------------------------------------------------------------*/
+  
+  (alarmConfig, span:null, limit:500000, debug:false) => do
+    // Normalize alarmConfig to record dictionary
+    alarmConfig= if (isRef(alarmConfig)) readById(alarmConfig) else alarmConfig
+    
+    // If expected tags are not found, throw an error
+    if (["pointRef","hisRollupInterval","alarmCondition","consecutiveRepeats"]
+        .any(v => alarmConfig.missing(v)))
+      throw "Missing a required tag"
+  
+    // Retrieve main parameters
+    hisRollupInterval: alarmConfig->hisRollupInterval
+    alarmCondition: alarmConfig->alarmCondition
+    consecutiveRepeats: alarmConfig->consecutiveRepeats
+  
+    if (span.isNull()) do
+      // Load history over three times hisRollupInterval x consecutiveRepeats
+      // We extend to two times the overall period to account for lags in sync
+      // and to ensure alarms aren't released prematurely.
+      spanDuration: 2 * hisRollupInterval * consecutiveRepeats
+      span= now()-spanDuration..now()
+    end
+  
+    // Process optional additionalPoint by creating validity periods to intersect with
+    if (["additionalPointRef","additionalCondition"].all(v => alarmConfig.has(v))) do
+      validPeriods: readById(alarmConfig->additionalPointRef)
+                    .hisRead(span, {limit:limit})
+                    .hisRollupAuto(hisRollupInterval)
+                    .hisFindPeriods(val => isNumber(val) and not isNaN(val)
+                                           and eval(val + alarmConfig->additionalCondition))
+    end else validPeriods: null
+  
+    // Determine current alarm state, suppress alarms with additionalCondition only if alarm is
+    // not already active. In other words, alarm suppression based on additionalCondition only
+    // works for new alarms, not currently-active alarms
+    isActive: readAll(emailAlarm==true and alarmConfigRef==alarmConfig->id).size > 0
+  
+    // Retrieve target point
+    pt: readById(alarmConfig->pointRef)
+  
+    // Load history
+    hisGrid: pt
+    .hisRead(span, {limit:limit})
+  
+    // Process trend
+    if (pt["kind"]=="Number") do
+      hisGrid= hisGrid.hisRollupAuto(hisRollupInterval)
+      hisRollup: hisGrid.col("v0").meta->hisRollup
+    else
+      hisRollup: null
+  
+    // If pt has kind "Number", rollup and apply alarmCondition test
+    // If pt has kind "Bool", test for true and apply alarmCondition to periods
+    conditionMetPeriods:
+    if (pt["kind"]=="Number")
+      hisGrid
+      .hisFindPeriods(val => isNumber(val) and not isNaN(val)
+                             and eval(val + alarmCondition))
+    else if (pt["kind"]=="Bool")
+      hisGrid
+      // Test for true
+      .hisFindPeriods(val => val)
+      // Apply watchAlarmStr to period duration (e.g. "> 10min")
+      .hisFindAll(val => eval(val + alarmCondition))
+      // Merge adjacent periods based on watchPeriod
+      .hisPeriodShift(-hisRollupInterval, hisRollupInterval)
+      .hisPeriodShift(hisRollupInterval, -hisRollupInterval)
+  
+    // Initialize alarmPeriods
+    alarmPeriods: conditionMetPeriods
+  
+    // Apply validPeriods, if available, and only if alarm is not yet active
+    if (validPeriods != null and not isActive)
+      alarmPeriods= hisPeriodIntersection([alarmPeriods, validPeriods])
+      // Preserve original meta data
+                    .addColMeta("v0",conditionMetPeriods.col("v0").meta)
+  
+    // Only keep periods longer than the duration threshold
+    alarmPeriods= alarmPeriods
+    .findAll(r => r->v0 >= hisRollupInterval * consecutiveRepeats)
+  
+  /*------------------------------------------------------------------------------------------------*/
+    if (debug) do
+      hisGrid= 
+      try hisGrid.addColMeta("v0", {chartType: if (pt["kind"]=="Bool") "runtime"
+                                               else if (hisRollup=="sum") "bar" 
+                                               else "line",
+                                    chartGroup: if (pt["kind"]=="Bool") null
+                                                else "same"})         
+      catch null
+               
+      validPeriods=
+      try validPeriods.addColMeta("v0", {dis: "Additional condition is met",
+                                         chartType:"runtime",
+                                         color:"forestgreen",
+                                         -weather,
+                                         -weatherStationRef,
+                                         chartGroup:"same"})
+      catch null
+      
+      conditionMetPeriods= 
+      try conditionMetPeriods.addColMeta("v0", {dis: "Alarm condition met over 1+ periods",
+                                                chartType:"runtime",
+                                                color:"orange",
+                                                chartGroup:"same"})
+      catch null
+      
+      alarmPeriods=
+      try alarmPeriods.addColMeta("v0", {dis: "Alarm results",
+                                         chartType:"runtime",
+                                         color:"red",
+                                         chartGroup:"same"})
+      catch null
+      
+      [hisGrid,validPeriods,conditionMetPeriods,alarmPeriods]
+      .findAll(v => v != null)
+      .hisJoin()
+      .addColMeta("ts",
+                  {format:"WWW M/DD"+ (if (hisRollupInterval<1day) " ka" else "")})
+    end else
+      alarmPeriods
+  end
+---
+name:recAddAlarmConfig
+doc:"Specific version of 'recNew' for 'alarmConfig' records. Applies filter on fields, sets 'alarmConfig' and 'disMacro' tags."
+func
+src:
+  (addAlarmConfigDict) => do
+    // Normalize action input
+    addAlarmConfigDict= actionNormInput(addAlarmConfigDict, "dict")
+    
+    // Create changes dict
+    changesDict: addAlarmConfigDict
+    .findAll((v,k) =>
+      ["pointRef","hisRollupInterval","alarmCondition","consecutiveRepeats",
+       "emails","description","additionalPointRef","additionalCondition"]
+      .contains(k))
+    .set("alarmConfig", marker())
+    .set("disMacro", "\$pointRef \$alarmCondition")
+    
+    // Commit changes
+    recNew(changesDict)
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2024-09-06  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:recDuplicateAlarmConfig
+doc:"Duplication function for 'alarmConfig' records."
+func
+src:
+  (addAlarmConfigDict) => do
+    // Normalize action input
+    addAlarmConfigDict= actionNormInput(addAlarmConfigDict, "dict")
+    
+    // Load original dictionary based on id, this dict will contain
+    // all fields
+    originalDict: readById(addAlarmConfigDict->id)  
+  
+    // Initialize new dictionary for our new record
+    newDict: originalDict
+  
+    // Any record present in addAlarmConfigDict represents a change
+    // from the originalDict. Apply change to newDict.
+    addAlarmConfigDict.each((v,n) => do
+      newDict= newDict.set(n, v)
+    end)
+  
+    // This will be a new record, remove "id" and "mod" fields
+    newDict= newDict
+    .remove("id")
+    .remove("mod")
+  
+    // Save record
+    recAddAlarmConfig(newDict)
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2024-09-06  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:recTrashAlarmConfig
+doc:"Specific version of 'recTrash' for 'alarmConfig' records. Also removes related 'emailAlarm' records."
+func
+src:
+  (refs) => do
+    // Normalize action input
+    refs= actionNormInput(refs, "ids")
+    
+    // Cycle through records and trash all related emailAlarm records
+    if (isRef(refs)) refs=[refs]
+    refs.each ref => do
+      // Trash related deficiencyNote records
+      try readAll(emailAlarm and alarmConfigRef==ref).recTrash()
+      // If no emailAlarm record is found, recTrash may fail on empty grid
+      catch null
+    end
+  
+    recTrash(refs)  
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2024-09-10  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:taskEmailAlarms
+doc:"Cycle through 'emailAlarm' records, and send update emails if appropriate. All 'emailAlarm' records are managed by 'taskUpdateAlarms' - except email tracking via 'emailSent' and 'emailSentDateTime' fields, which are updated by this function."
+func
+src:
+  /*--------------------------------------------------------------------------------------------------
+    Cycle through emailAlarm records, and send update emails if appropriate. All emailAlarm records
+    are managed by taskUpdateAlarms - except email tracking via emailSent and emailSentDateTime fields
+    which are updated by this function.
+    
+    Arguments:
+    N/A
+  --------------------------------------------------------------------------------------------------*/
+  () => do
+    titleGrid: [
+      {email: "xyz0@aaa.bcd", scope: "Trend Alarms"},
+      {email: "xyz1@aaa.bcd", scope: "Trend Alarms"},
+      {email: "xyz2@aaa.bcd", scope: "Metering Trend Alarms"},
+      {email: "xyz3@aaa.bcd", scope: "Metering Trend Alarms"},
+      {email: "xyz4@aaa.bcd", scope: "Trend Alarms"}]
+    .toGrid()
+    .addCol("title", r => "SkySpark " + r->scope)
+    
+    // Load emailAlarm records, exit if there are none
+    if (isEmpty(readAll(emailAlarm))) return null
+    
+    // Cycle through unique emails in emailAlarm records, send email if needed
+    readAll(emailAlarm).colToList("email").unique().findAll(v => v!=null)
+    .each email => do
+      // Determine email title based on email address
+      title: try titleGrid.find(r => r->email==email)["title"] catch null
+      if (title==null) title= "SkySpark Trend Alarms"
+      
+      // Updates are generated for new alarms, cleared alarms, and old previously-reported alarms
+      updateGrid: readAll(emailAlarm and email==email
+                          and (emailSent==false 
+                               or (emailAlarm==true and emailSentDateTime<now()-3day))
+                         )
+                          
+      // Only proceed if there are updates or reminders to send
+      if (isEmpty(updateGrid)) return null
+      // Create update strings for new alarms, previously reported alarms and cleared alarms
+      else do
+        newFlags: updateGrid.findAll(r => r->emailAlarm and r->emailSent==false)
+        newFlagsStr: if (isEmpty(newFlags)) null
+                     else "-- " + newFlags.colToList("dis").concat(",\n-- ")
+                       
+        exFlags: readAll(emailAlarm==true and emailSent==true and email==email)
+        exFlagsStr: if (isEmpty(exFlags)) null
+                    else try "-- " + exFlags.colToList("disReminder").concat(",\n-- ")
+                         catch "-- " + exFlags.colToList("dis").concat(",\n-- ")
+                               
+        clearedFlags: updateGrid.findAll(r => not(r->emailAlarm))
+        clearedFlagsStr: if (isEmpty(clearedFlags)) null
+                         else "-- " + clearedFlags.colToList("dis").concat(",\n-- ")
+        
+        // Create body of email
+        emailStr: ""
+        if (newFlagsStr != null)
+          emailStr= emailStr
+          + "New alarms:\n"
+          + newFlagsStr + "\n\n"
+        if (clearedFlagsStr != null)
+          emailStr= emailStr
+          + "Recovery - Back to normal conditions for:\n"
+          + clearedFlagsStr + "\n\n"
+        if (exFlagsStr != null)
+          emailStr= emailStr
+          + "Previously reported - Alarm conditions are still present for:\n"
+          + exFlagsStr + "\n\n"
+        else if (newFlagsStr.isNull())
+          emailStr= emailStr
+          + "There are no remaining alarms."
+  
+        // Create email title
+        emailSub: if (newFlagsStr != null)
+                    title + " - New Alarms"
+                  else if (clearedFlagsStr != null and exFlagsStr.isNull())
+                    title + " - Full Recovery Detected"
+                  else if (clearedFlagsStr != null)
+                    title + " - Partial Recovery Detected"
+                  else
+                    title + " - Reminders"
+      
+        // Send email and update records if successful
+        try do
+          emailSend(email, emailSub, emailStr)
+          readAll(emailAlarm and email==email)
+          .each rec => commit(diff(rec, {emailSent:true, emailSentDateTime:now()}))
+        end catch
+          return null
+      end
+    end // each email address
+  end
+  
+  /*--------------------------------------------------------------------------------------------------
+    Updates
+    2024-09-06  Raphael Vitti
+      Created.
+    2024-09-09  Raphael Vitti
+      Now using reminder description for existing alarms.
+  --------------------------------------------------------------------------------------------------*/
+---
+name:taskUpdateAlarms
+doc:
+  Cycle through all 'alarmConfig' records and check recent trends to determine whether alarm conditions were met recently.
+    
+  Testing is done over a period of 2 x 'hisRollupInterval' x 'consecutiveRepeats', to account for lags in history sync and to avoid prematurely clearing alarms.
+    
+  Use database records to remember latest status.
+  If record is missing, status is considered un-alarmed.
+    
+  **Arguments**:
+    msg       Task msg (see task framework), not using any msg inputs currently
+    limit     Maximum number of data points to load with hisRead
+func
+src:
+  /*--------------------------------------------------------------------------------------------------
+    Cycle through all alarmConfig records and check recent trends to determine whether alarm 
+    conditions were met recently.
+    
+    Use database records to remember latest status.
+    If record is missing, status is considered un-alarmed.
+    
+    Arguments:
+    msg       Task msg (see task framework), not currently using any msg inputs
+  --------------------------------------------------------------------------------------------------*/
+  (msg:null) => do
+  
+    /*------------------------------------------------------------------------------------------------
+    // Cycle through alarm config records, check alarm conditions, update emailAlarm records
+    ------------------------------------------------------------------------------------------------*/
+    // Cycle through each alarm config record separately
+    readAll(alarmConfig and not disabled).each((alarmConfig, i) => try do    
+  
+      // Perform analysis using anAlarmPeriods, defaults to most recent trends
+      alarmPeriods: anAlarmPeriods(alarmConfig)
+      
+      // Retrieve target point
+      pt: readById(alarmConfig->pointRef)
+      
+      // Retrieve main parameters for display
+      hisRollupInterval: alarmConfig->hisRollupInterval
+      alarmCondition: alarmConfig->alarmCondition
+      consecutiveRepeats: alarmConfig->consecutiveRepeats
+      
+      // If there are remaining periods, flag the point
+      emailAlarm: not(isEmpty(alarmPeriods))
+  
+      // Create or update one record per email
+      alarmConfig->emails.each email => do
+        // Find monitoring record for this point and email, if it exists
+        mRec: read(emailAlarm and alarmConfigRef==alarmConfig->id and email==email, false)
+        
+        // Prepare main text description for generated alarm
+        alarmText: pt.dis + " (" + hisRollupInterval + " rollup) observed " + alarmCondition
+                          + " over " + hisRollupInterval * consecutiveRepeats
+        // And retrieve user-provided alarm description
+        alarmDetails: if(alarmConfig.has("description")) " (" + alarmConfig->description + ")" else ""
+        
+        // If it doesn't exist, consider previous status was emailAlarm=false
+        // Update if emailAlarm is different from previous status
+        if ((mRec==null and emailAlarm) or
+            (mRec!=null and mRec["emailAlarm"]!=emailAlarm)) do
+          newRec: {
+            emailAlarm: emailAlarm,
+            alarmConfigRef: alarmConfig->id,
+            alarmCondition: alarmCondition,
+            hisRollupInterval: hisRollupInterval,
+            consecutiveRepeats: consecutiveRepeats,
+            started: if (emailAlarm) today() else null,
+            dis: if (emailAlarm)
+                alarmText + alarmDetails
+              else
+                alarmConfig.dis + " (Alarm cleared)",
+            disReminder: alarmText + ", since " + today().format("WWW, YYYY-MMM-DD") + alarmDetails,
+            email: email,
+            emailSent: false
+          }
+          // Create or update record
+          commit(diff(mRec, newRec, if (mRec==null) {add} else null))
+        end
+      end // each email
+      // If alarmConfig record has err tag, remove at this time
+      if (alarmConfig.has("err")) commit(diff(readById(alarmConfig->id), {-err}, {transient}))
+    end // each alarm config record
+    catch (ex) // Process exceptions by updating alarmConfig record
+      commit(diff(readById(alarmConfig->id), {err:ex}, {transient}))
+    )
+    
+    // Call taskEmailAlarms
+    taskEmailAlarms()
+  end
+  
+  /*--------------------------------------------------------------------------------------------------
+    Updates
+    2024-09-06  Raphael Vitti
+      Created.
+    2024-09-09  Raphael Vitti
+      Added reminder description with alarm start date.
+    2024-10-22  Raphael Vitti
+      Now checking current alarm state early, and suppressing alarm based on additionalCondition
+      only if alarm is not active yet. To avoid clearing alarms based on transient conditions.
+    2024-10-23  Raphael Vitti
+      Removed default list of emails. Default behavior is now not to send any emails if list of emails
+      is not configured in alarmConfig record.
+      Moved analysis portion to a separate anAlarmPeriods func for easier testing.
+  --------------------------------------------------------------------------------------------------*/
+---
+name:viAlarmConfig
+doc:"Formatted table for 'alarmConfig' records. Includes information about the current alarm state."
+func
+src:
+  () => do
+    // Retrieve records
+    grid: readAll(alarmConfig)
+  
+    // Add info about current alarm state
+    grid= grid
+    .addCol("state", r => do
+              rec: read(emailAlarm and alarmConfigRef==r->id, false)
+              if (rec.isNull() or not(rec->emailAlarm)) "Off"
+              else "Since " + rec->started.format("WWW, YYYY-MMM-DD")
+            end)
+  
+    // Format results and sort by work order number
+    disCols: ["id","err","hisRollupInterval","alarmCondition","consecutiveRepeats","state",
+              "emails","description","additionalPointRef","additionalCondition"]
+  
+    grid= grid
+    .sortDis
+    .toolFormatGrid(disCols)
+  
+    // Format column names
+    if (grid.has("id")) grid= grid.addColMeta("id", {dis: "Alarm Config", colWidth:400})
+    if (grid.has("err")) grid= grid.addColMeta("err", {dis: "Config Error", colWidth:200})
+    if (grid.has("hisRollupInterval")) grid= grid.addColMeta("hisRollupInterval", {dis: "Interval"})
+    if (grid.has("alarmCondition")) grid= grid.addColMeta("alarmCondition", {dis: "Condition"})
+    if (grid.has("consecutiveRepeats")) grid= grid.addColMeta("consecutiveRepeats", {dis: "Repeats"})
+    if (grid.has("state")) grid= grid.addColMeta("state", {dis: "Current State"})
+    if (grid.has("emails")) grid= grid.addColMeta("emails", {dis: "Emails", colWidth:100})
+    if (grid.has("description")) grid= grid.addColMeta("description", {dis: "Description"})
+    if (grid.has("additionalPointRef"))
+      grid= grid.addColMeta("additionalPointRef", {dis: "Additional Point"})
+    if (grid.has("additionalCondition"))
+      grid= grid.addColMeta("additionalCondition", {dis: "Condition on Additional Point"})
+    
+    grid
+  end
+  
+  /*--------------------------------------------------------------------------------------------------
+    Updates
+    2024-09-06  Raphael Vitti
+      Created.
+    2024-09-09  Raphael Vitti
+      Added current alarm state.  
+  --------------------------------------------------------------------------------------------------*/
+---
+name:toolFormatGrid
+func
+src:
+  /*------------------------------------------------------------------------------
+    Copyright 2022 Raphael Vitti
+    
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+  
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+    GNU General Public License for more details.
+  
+    You should have received a copy of the GNU General Public License
+    along with this program. If not, see <https://www.gnu.org/licenses/>.
+  ------------------------------------------------------------------------------*/
+  /*------------------------------------------------------------------------------
+    Reorders grid columns based on the order of provided column
+    names, and hides all other columns.
+    
+    Arguments:
+    grid            Grid to format
+    disColNames     Str[], specifies names and order of columns
+                    to display
+  ------------------------------------------------------------------------------*/
+  
+  (grid, disColNames:null) => do
+    // Test inputs
+    if (grid==null or isEmpty(grid)) return grid
+    if (disColNames==null) disColNames= grid.colNames
+    
+    // Retrieve column names from grid and remove any display
+    // column name not found in the results
+    colNames: grid.colNames
+    disColNames.each v => do
+      if (not(colNames.contains(v)))
+        disColNames= disColNames.remove(disColNames.index(v))
+    end
+    
+    // Cycle through disColNames to:
+    // 1- Reorder grid columns according to disColNames order
+    // 2- Prepare list of columns to hide
+    hidColNames: colNames
+    disColNames.each((v,i) => do
+      colNames= colNames.moveTo(v,i)
+      hidColNames= hidColNames.remove(hidColNames.index(v))
+    end)
+    grid= grid.reorderCols(colNames)
+    
+    // Hide columns which name is not in disColNames
+    hidColNames.each v =>
+      grid= grid.addColMeta(v,{hidden})
+      
+    return grid
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2022-09-01  Raphael Vitti
+      Updated header and footer.
+  ------------------------------------------------------------------------------*/

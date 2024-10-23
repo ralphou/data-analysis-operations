@@ -1,0 +1,31 @@
+dis:Add Alarm Config
+tags:
+  pointRef: {kind:"Ref<point>" navAuxFilter:"his"}
+  hisRollupInterval: {kind:"Number" defVal:1day}
+  alarmCondition: {kind:"Str" defVal:">1000"}
+  consecutiveRepeats: {kind:"Number" unitless defVal:12}
+  emails: {kind:"Str[]" defVal:["xyz0@aaa.bcd","xyz1@aaa.bcd","xyz2@aaa.bcd"]}
+  description: {kind:"Str" optional}
+  additionalPointRef: {kind:"Ref<point>" navAuxFilter:"his" optional}
+  additionalCondition: {kind:"Str" optional}
+  state: {hidden}
+  alarmConfig: {hidden}
+  disMacro: {hidden}
+template:addAlarmConfig
+---
+dis:Edit Alarm Config
+tags:
+  id: {kind:"Ref<point>" hidden}
+  pointRef: {kind:"Ref<point>" navAuxFilter:"his"}
+  hisRollupInterval: {kind:"Number" defVal:1day}
+  alarmCondition: {kind:"Str" defVal:">1000"}
+  consecutiveRepeats: {kind:"Number" unitless defVal:12}
+  emails: {kind:"Str[]" defVal:["xyz0@aaa.bcd","xyz1@aaa.bcd","xyz2@aaa.bcd"]}
+  description: {kind:"Str" optional}
+  additionalPointRef: {kind:"Ref<point>" navAuxFilter:"his" optional}
+  additionalCondition: {kind:"Str" optional}
+  mod: {kind:"DateTime" hidden}
+  state: {hidden optional}
+  alarmConfig: {hidden optional}
+  disMacro: {hidden optional}
+template:editAlarmConfig

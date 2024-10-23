@@ -1,0 +1,22 @@
+dis:Alarms
+appName:notifications
+order:6000
+view:alarms
+src:
+  view: {inherit:"tile"}
+  layout: {var kind:"Str" defVal:"grid 6x6; 0 0 3 6; 3 0 3 6"}
+  alarmConfig: Trio:
+    view: {inherit:"table"}
+    selectedId: {var bindSelect:"id"}
+    add: {dis:"Add" refresh action:"recAddAlarmConfig" templateName:"addAlarmConfig"}
+    edit: {dis:"Edit" refresh action:"recEdit" templateName:"editAlarmConfig" select}
+    dup: {dis:"Duplicate" refresh action:"recDuplicateAlarmConfig" templateName:"addAlarmConfig" select}
+    trash: {dis:"Trash" confirm:{dis:"Moving alarm configuration records to trash" details:"You are about to move the selected alarm configuration records and all their related alarm records to the trash. Click yes to continue."} refresh action:"recTrashAlarmConfig" select multi}
+    data: {expr:"viAlarmConfig()"}
+  chart: Trio:
+    view: {inherit:"chart"}
+    alarmRef: {var input binding:"../alarmConfig/selectedId"}
+    span: {var kind:"Span" input defExpr:"pastMonth().toSpan()"}
+    limit: {var kind:"Number" unitless defVal:500000}
+    data: {expr:"anAlarmPeriods({{alarmRef}},{{span}}, {{limit}}, true)"}
+  

@@ -1,0 +1,29 @@
+def:^additionalCondition
+doc:"Optional additional condition, applied to 'additionalPointRef'. Alarms are suppressed while the additional point does not meet the 'additionalCondition'. Alarms are only raised when both the primary condition and the additional condition are met for the required number of history rollup intervals ('hisRollupInterval')."
+is:[^str]
+tagOn:[^alarmConfig]
+---
+def:^additionalPointRef
+doc:"Optional additional point, which must meet its associated condition ('additionalCondition') for an alarm to occur. In other words, alarms are suppressed while the additional point does not meet the 'additionalCondition'."
+is:[^ref]
+of:^point
+tagOn:[^alarmConfig]
+---
+def:^alarmCondition
+doc:"Condition to activate an alarm based on the point's history. This is a string, for example \"> 500kW\" or \"< 60°F\". Units are optional but recommended for clarity. For an alarm to be raised, the condition must be met each interval ('hisRollupInterval') for a number of consecutive intervals ('consecutiveRepeats')."
+is:[^str]
+tagOn:[^alarmConfig]
+---
+def:^alarmConfig
+doc:Marker for alarm configuration record
+is:[^marker]
+---
+def:^consecutiveRepeats
+doc:"Number of consecutive 'hisRollupInterval' periods over which alarm conditions must be met, for an alarm to be raised."
+is:[^number]
+tagOn:[^alarmConfig]
+---
+def:^package
+doc:Name of custom package the record belongs to
+is:[^str]
+tagOn:[^func,^template,^view,^app,^def]
