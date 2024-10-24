@@ -21,8 +21,8 @@ History-based alarms, for typical time scales ranging from 15 minutes to several
 Includes trio files with all required records, including app, view, templates, funcs and defs. A compiled pod is
 also available, tested with version 3.1.10.
 
-For automated alarming, a task needs to be configured to call `taskUpdateAlarms` regularly, for example
+For automated alarming, a task needs to be configured to call `taskUpdateAlarms()` regularly, for example
 every 5 minutes.
 
 # Dependencies
-Extension 'tools' is required.
+Extension `tools` is required.
