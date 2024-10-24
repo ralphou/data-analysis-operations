@@ -1,5 +1,14 @@
 name:anAlarmPeriods
-doc:"For a provided 'alarmConfig' record and a provided span, check trends to determine whether alarm conditions were met."
+doc:
+  For a provided alarmConfig record and a provided span, check trends to determine whether alarm conditions were met. Return alarm periods. In debug mode, return fomatted trend and periods.
+    
+  If span is not provided, check most recent trends. In this case, testing is done over a period of 2 x hisRollupInterval x consecutiveRepeats, to account for lags in history sync and to avoid prematurely clearing alarms.
+  
+  **Arguments**:
+    alarmConfig     Alarm config record or id
+    span            Time span for analysis
+    limit           Number used to limit hisRead
+    debug           Bool, if true return trend, single-period results, and additionalCondition 
 func
 src:
   /*--------------------------------------------------------------------------------------------------
@@ -97,7 +106,7 @@ src:
     alarmPeriods= alarmPeriods
     .findAll(r => r->v0 >= hisRollupInterval * consecutiveRepeats)
   
-  /*------------------------------------------------------------------------------------------------*/
+    // In debug mode, format and join data
     if (debug) do
       hisGrid= 
       try hisGrid.addColMeta("v0", {chartType: if (pt["kind"]=="Bool") "runtime"
@@ -334,14 +343,11 @@ name:taskUpdateAlarms
 doc:
   Cycle through all 'alarmConfig' records and check recent trends to determine whether alarm conditions were met recently.
     
-  Testing is done over a period of 2 x 'hisRollupInterval' x 'consecutiveRepeats', to account for lags in history sync and to avoid prematurely clearing alarms.
-    
   Use database records to remember latest status.
-  If record is missing, status is considered un-alarmed.
+  If record is missing, previous status is considered un-alarmed.
     
   **Arguments**:
     msg       Task msg (see task framework), not using any msg inputs currently
-    limit     Maximum number of data points to load with hisRead
 func
 src:
   /*--------------------------------------------------------------------------------------------------
@@ -440,6 +446,13 @@ name:viAlarmConfig
 doc:"Formatted table for 'alarmConfig' records. Includes information about the current alarm state."
 func
 src:
+  /*--------------------------------------------------------------------------------------------------
+    Formatted table for 'alarmConfig' records. Includes information about the current alarm state.  
+    
+    Arguments:
+    N/A
+  --------------------------------------------------------------------------------------------------*/
+  
   () => do
     // Retrieve records
     grid: readAll(alarmConfig)
@@ -484,68 +497,3 @@ src:
     2024-09-09  Raphael Vitti
       Added current alarm state.  
   --------------------------------------------------------------------------------------------------*/
----
-name:toolFormatGrid
-func
-src:
-  /*------------------------------------------------------------------------------
-    Copyright 2022 Raphael Vitti
-    
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-  
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-    GNU General Public License for more details.
-  
-    You should have received a copy of the GNU General Public License
-    along with this program. If not, see <https://www.gnu.org/licenses/>.
-  ------------------------------------------------------------------------------*/
-  /*------------------------------------------------------------------------------
-    Reorders grid columns based on the order of provided column
-    names, and hides all other columns.
-    
-    Arguments:
-    grid            Grid to format
-    disColNames     Str[], specifies names and order of columns
-                    to display
-  ------------------------------------------------------------------------------*/
-  
-  (grid, disColNames:null) => do
-    // Test inputs
-    if (grid==null or isEmpty(grid)) return grid
-    if (disColNames==null) disColNames= grid.colNames
-    
-    // Retrieve column names from grid and remove any display
-    // column name not found in the results
-    colNames: grid.colNames
-    disColNames.each v => do
-      if (not(colNames.contains(v)))
-        disColNames= disColNames.remove(disColNames.index(v))
-    end
-    
-    // Cycle through disColNames to:
-    // 1- Reorder grid columns according to disColNames order
-    // 2- Prepare list of columns to hide
-    hidColNames: colNames
-    disColNames.each((v,i) => do
-      colNames= colNames.moveTo(v,i)
-      hidColNames= hidColNames.remove(hidColNames.index(v))
-    end)
-    grid= grid.reorderCols(colNames)
-    
-    // Hide columns which name is not in disColNames
-    hidColNames.each v =>
-      grid= grid.addColMeta(v,{hidden})
-      
-    return grid
-  end
-  
-  /*------------------------------------------------------------------------------
-    Updates
-    2022-09-01  Raphael Vitti
-      Updated header and footer.
-  ------------------------------------------------------------------------------*/

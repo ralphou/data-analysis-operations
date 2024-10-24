@@ -22,8 +22,3 @@ def:^consecutiveRepeats
 doc:"Number of consecutive 'hisRollupInterval' periods over which alarm conditions must be met, for an alarm to be raised."
 is:[^number]
 tagOn:[^alarmConfig]
----
-def:^package
-doc:Name of custom package the record belongs to
-is:[^str]
-tagOn:[^func,^template,^view,^app,^def]
