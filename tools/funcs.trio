@@ -1,0 +1,51 @@
+name:toolFormatGrid
+doc:
+  Reorders grid columns based on the order of provided column names, and hides all other columns.
+    
+  Arguments:
+    grid            Grid to format
+    disColNames     Str[], specifies names and order of columns to display
+func
+src:
+  /*--------------------------------------------------------------------------------------------------
+    Reorders grid columns based on the order of provided column names, and hides all other columns.
+    
+    Arguments:
+    grid            Grid to format
+    disColNames     Str[], specifies names and order of columns to display
+  --------------------------------------------------------------------------------------------------*/
+  
+  (grid, disColNames:null) => do
+    // Check inputs
+    if (grid==null or isEmpty(grid)) return grid
+    if (disColNames==null) disColNames= grid.colNames
+    
+    // Retrieve column names from grid and remove any display column name not found in the results
+    colNames: grid.colNames
+    disColNames.each v => do
+      if (not(colNames.contains(v)))
+        disColNames= disColNames.remove(disColNames.index(v))
+    end
+    
+    // Cycle through disColNames to:
+    // 1- Reorder grid columns according to disColNames order
+    // 2- Prepare list of columns to hide
+    hidColNames: colNames
+    disColNames.each((v,i) => do
+      colNames= colNames.moveTo(v,i)
+      hidColNames= hidColNames.remove(hidColNames.index(v))
+    end)
+    grid= grid.reorderCols(colNames)
+    
+    // Hide columns which name is not in disColNames
+    hidColNames.each v =>
+      grid= grid.addColMeta(v,{hidden})
+      
+    grid
+  end
+  
+  /*--------------------------------------------------------------------------------------------------
+    Updates
+    2022-09-01  Raphael Vitti
+      Updated header and footer.
+  --------------------------------------------------------------------------------------------------*/

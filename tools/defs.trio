@@ -1,0 +1,4 @@
+def:^package
+doc:Name of custom package the record belongs to
+is:[^str]
+tagOn:[^func,^template,^view,^app,^def]
