@@ -23,3 +23,6 @@ also available, tested with version 3.1.10.
 
 For automated alarming, a task needs to be configured to call `taskUpdateAlarms` regularly, for example
 every 5 minutes.
+
+# Dependencies
+Extension 'tools' is required.
