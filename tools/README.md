@@ -1,3 +1,4 @@
+# Copyright Notice
   Haxall and Haystack Data Analysis for Building Operations (Data Analysis for
   Operations) Copyright (c) 2023, The Regents of the University of California,
   through Lawrence Berkeley National Laboratory (subject to receipt of any
@@ -15,5 +16,5 @@
   works, and perform publicly and display publicly, and to permit others to do 
   so.
 
-# tools
+# Module tools
 Generic tools used in Data Analysis for Operations.
