@@ -18,7 +18,7 @@
   works, and perform publicly and display publicly, and to permit others to do 
   so.
 
-# Module hisAlarm
+# Module: hisAlarm
 History-based alarms, for typical time scales ranging from 15 minutes to several days, with email notifications.
 
 Includes trio files with all required records, including app, view, templates, funcs and defs. A compiled pod is
