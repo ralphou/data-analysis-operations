@@ -18,6 +18,8 @@
 # hisFormula
 Calculated histories based on configurable formula records.
 
+**Warning**: Calculated points count against a server's SkySpark license.
+
 Includes trio files with all required records, including views, templates and funcs. A compiled pod is
 also available, tested with version 3.1.10.
 
