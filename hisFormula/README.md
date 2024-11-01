@@ -1,5 +1,6 @@
 ![Main hisFormula configuration view example](./assets/hisFormula_main_view_example.jpg)
 
+# Copyright Notice
   Haxall and Haystack Data Analysis for Building Operations (Data Analysis for
   Operations) Copyright (c) 2023, The Regents of the University of California,
   through Lawrence Berkeley National Laboratory (subject to receipt of any
