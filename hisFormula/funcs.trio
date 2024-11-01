@@ -1,0 +1,1104 @@
+name:hisFormulaCalc
+doc:
+  This function calculates history for a virtual point using hisFormula records with calculatedPointRef equal to the target virtual point.
+  History is clipped to exact spans to limit overlap between multiple formulas. Therefore, subsequent any subsequent rollup may result in a more limited span than desired.
+  
+  Arguments:
+    ptId
+    startDate
+   
+  Tags:
+    - virtual
+    --- hisFunc
+    --- hisFormulaWrite false
+    --- hisInterval
+    --- hisMissingVals (optional) hide / show
+func
+src:
+  /*------------------------------------------------------------------------------
+    For a calculated point associated with a formula, load required trends and
+    perform calculations, then return resulting calculated trend as a hisGrid.
+  
+    Arguments:
+    ptId     Ref<point>, id of calculated point, must have an associated formula
+    span     Span to perform calculation on
+    limit    Limit number of measurements, used in xqHisRead
+    debug    Bool, if true return underlying trends and intermediary calcs
+  ------------------------------------------------------------------------------*/
+  
+  (ptId, span, limit:1000000, debug:false) => do
+    /*----------------------------------------------------------------------------
+    // Process inputs
+    ----------------------------------------------------------------------------*/
+    // Normalize to record
+    rec: if (isRef(ptId)) readById(ptId) else ptId
+    
+    // Load params from target point record
+    hisInterval: if (rec.has("hisInterval")) rec->hisInterval else 15min
+    hisMissingVals: if (rec.has("hisMissingVals")) rec->hisMissingVals
+                    else "hide"
+    
+    // Determine target unit
+    tUnit: rec->unit
+  
+    // Normalize span to DateTime span
+    span= span.toSpan
+  
+    /*----------------------------------------------------------------------------
+    // Split span as needed based on overlap with formulas
+    ----------------------------------------------------------------------------*/
+    // Query formulas that overlap span
+    hisFormulaRecs: readAll(
+      hisFormula and calculatedPointRef==rec->id
+      and startDateTime <= span.end
+      and (not endDateTime or endDateTime >= span.start))
+  
+    // Split query span between formulas. Note that overlap between formulas is
+    // allowed and will be managed later by averaging results
+    hisFormulaRecs= hisFormulaRecs
+    .addCol("span", hisFormulaRec => do
+      s: if (hisFormulaRec->startDateTime >= span.start)
+           hisFormulaRec->startDateTime
+         else span.start
+      e: if (hisFormulaRec.has("endDateTime")
+             and hisFormulaRec->endDateTime <= span.end)
+           hisFormulaRec->endDateTime
+         else span.end
+      s..e
+    end)
+    // Sort by startDateTime
+    .sort((a,b) => a->startDateTime <=> b->startDateTime)
+  
+    // Exit if there is no overlap between queried span and formulas
+    if (isEmpty(hisFormulaRecs)) throw "No formula found for queried span"
+  
+    /*----------------------------------------------------------------------------
+    // Cycle through each formula and span, query history, apply formula
+    ----------------------------------------------------------------------------*/
+    // Prepare list of coefficient names
+    coeffCols: ["a","b","c","d","e","f","g","h","i","j","k","l","m",
+                "n","o","p","q","r","s","t","u","v","w","x","y","z"]
+                
+    // Initialize list of hisGrids (one hisGrid per formula)
+    hisGrids: []
+    
+    // Begin cycle through formulas
+    hisFormulaRecs.each(hisFormulaRec => do
+  
+      // Create formula function
+      formulaStr: hisFormulaRec->hisFormula
+      defcompStr:
+      """defcomp
+           a: {defVal:null}
+           b: {defVal:null}
+           c: {defVal:null}
+           d: {defVal:null}
+           e: {defVal:null}
+           f: {defVal:null}
+           g: {defVal:null}
+           h: {defVal:null}
+           i: {defVal:null}
+           j: {defVal:null}
+           k: {defVal:null}
+           l: {defVal:null}
+           m: {defVal:null}
+           n: {defVal:null}
+           o: {defVal:null}
+           p: {defVal:null}
+           q: {defVal:null}
+           r: {defVal:null}
+           s: {defVal:null}
+           t: {defVal:null}
+           u: {defVal:null}
+           v: {defVal:null}
+           w: {defVal:null}
+           x: {defVal:null}
+           y: {defVal:null}
+           z: {defVal:null}
+           out: {}
+           do
+             out = """ + formulaStr +
+      """  end
+         end"""
+      formulaFunc: eval(defcompStr)
+  
+      // Further split formula record's span if required (maxSpanIncrement)
+      spans: []
+      formulaSpan: hisFormulaRec->span
+      spanStart: formulaSpan.start()
+      spanEnd: formulaSpan.end()
+      spanDuration: (spanEnd - spanStart).to(1hr)
+      maxSpanIncrement: try hisFormulaRec->maxSpanIncrement.to(1hr) catch null
+      if (maxSpanIncrement==24hr and spanDuration > maxSpanIncrement) do
+        formulaSpan.eachDay(spanDay => do
+          chunkStart: maxDatetime(spanDay.toSpan.start(), spanStart)
+          chunkEnd: minDatetime(spanDay.toSpan.end(), spanEnd)
+          spans= spans.add(chunkStart..chunkEnd)
+        end)
+      else if (maxSpanIncrement != null and spanDuration > maxSpanIncrement) do
+        increments: ceil(spanDuration / maxSpanIncrement).as(1)
+        (0..increments-1).each(i => do
+          chunkStart: spanStart + i * maxSpanIncrement
+          chunkEnd: spanStart + (i+1) * maxSpanIncrement
+          spans= spans.add(chunkStart..chunkEnd)
+        end)
+      else spans= spans.add(hisFormulaRec->span)
+      
+      // Cycle through spans
+      spans.each(chunk => do
+    
+        // Initialize query of required histories
+        sourceQ: xq({allowNesting})
+                 .xqReadByIds(hisFormulaRec
+                              .findAll((v,k) => coeffCols.contains(k) and v!=null)
+                              .vals)
+                 .xqHisRead(chunk, {limit:limit})
+  
+        // Perform rollup in cluster query to reduce unnecessary transfer of data
+        hisGrid: sourceQ
+        .xqHisRollupAuto(hisInterval)
+        .xqExecute()
+      
+        // Exit if empty history grid
+        if (isEmpty(hisGrid)) return null
+      
+        // Throw exception if not all data could be loaded due to limit
+        if (hisGrid.meta.has("more"))
+          throw "Data limit exceeded: " + limit.format("#,###") + " readings. "
+                + "Use shorter span, shorter maxSpanIncrement, or higher limit."
+      
+        // Rename hisGrid columns to match formula
+        coeffCols.each(coeffCol => do
+          colName: hisGrid
+          .colNames
+          .find(colName =>
+            hisFormulaRec[coeffCol] != null and
+            hisGrid.col(colName).meta["id"] == hisFormulaRec[coeffCol],
+            false)
+          if (colName != null) hisGrid= hisGrid.renameCol(colName, coeffCol)
+          if (colName != null and debug)
+            hisGrid= hisGrid
+            .addColMeta(coeffCol,
+              {dis: coeffCol + " : " + hisGrid.col(coeffCol).meta.dis()})
+        end)
+  
+        // Row by row, process history grid of source points and apply formula
+        hisGrid= hisGrid
+        .addCol("val", row => try formulaFunc(row)["out"].to(tUnit)
+                              catch na())
+        // Clip to remove values outside of chunk
+        .hisClip
+  
+        // Debug path
+        if (debug) do
+          // Apply metadata to "val" col to show results on separate chart
+          hisGrid= hisGrid
+          .addColMeta("val",
+                      {dis:rec.dis(), chartGroup:"output",
+                       chunkStart: chunk.start, chunkEnd:chunk.end})
+        // Regular path (not debug)
+        end else do
+          hisGrid= hisGrid
+          // Keep only ts and val columns
+          .keepCols(["ts","val"])
+        end
+  
+        // Add hisGrid to collection of hisGrids
+        hisGrids= hisGrids
+        .add(hisGrid)
+      end)  // each chunk
+    end)    // each hisFormulaRec
+    
+    /*----------------------------------------------------------------------------
+    // Combine computed histories from several formulas
+    ----------------------------------------------------------------------------*/
+    if (isEmpty(hisGrids)) return hisGrids
+    
+    combinedHisGrid: if (debug) return hisJoin(hisGrids)
+                                       .hisMap(v => if(v==null) na() else v)
+                     else hisJoin(hisGrids)
+                          .addMeta({hisLimit:999999999})
+                          .hisFoldCols(avg)
+  
+    // Replace null values with NA if hisMissingVals is "show"
+    if (hisMissingVals=="show")
+      combinedHisGrid= combinedHisGrid
+      .hisMap(v => if(v==null) na() else v)
+    
+    // Remove any calculated history in the future
+    combinedHisGrid= combinedHisGrid.findAll(row => row->ts<=now())
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2024-08-08  Raphael Vitti
+      Added hisClip back in, but later in the code, after applying formulaFunc.
+      Removing hisClip caused more issues, specifically in the case of 50B CHW
+      Plant Output Load Power, where the fomula calculated 0 instead of null
+      outside of chunk.
+    2023-07-31  Raphael Vitti
+      Removed hisClip to avoid empty periods when span and hisInterval don't line
+      up, e.g. rollup of 1hr on a span that starts and ends on 00:00:01.
+    2021-09-22  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:hisFormulaDependents
+func
+src:
+  /*------------------------------------------------------------------------------
+    Return a list of calculated points a given calculated point is upstream of.
+    In other words, returns the list of calculated points which values depend
+    upon values from the given calculated point.
+    Recursive.
+    
+    Arguments: 
+    calculatedPointRef     Id of calculated point, calculated from hisFormula
+    dependents             List of ids, dependent calculated points
+  ------------------------------------------------------------------------------*/
+  
+  (calculatedPointRef, dependents:[]) => do
+    coeffCols: ["a","b","c","d","e","f","g","h","i","j","k","l","m",
+                "n","o","p","q","r","s","t","u","v","w","x","y","z"]
+    
+    readAll(hisFormula)
+    .each(r => coeffCols.each(
+      c => if (r[c]==calculatedPointRef)
+             dependents= dependents
+             .add(r->calculatedPointRef)
+             .addAll(hisFormulaDependents(r->calculatedPointRef))))
+    
+    dependents.unique()
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2021-10-26  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:hisFormulaDepth
+func
+src:
+  /*------------------------------------------------------------------------------
+    Return a number that represents the maximum number of formula nodes a target
+    calculated point is downstream of.
+    Recursive.
+    
+    Arguments: 
+    calculatedPointRef     Id of calculated point, calculated from hisFormula
+    depth                  Current depth
+  ------------------------------------------------------------------------------*/
+  
+  (calculatedPointRef, depth:1) => do
+    coeffCols: ["a","b","c","d","e","f","g","h","i","j","k","l","m",
+                "n","o","p","q","r","s","t","u","v","w","x","y","z"]
+  
+    readAll(hisFormula)
+    .each(r => coeffCols.each(
+      c => if (r[c]==calculatedPointRef)
+             depth= [depth, hisFormulaDepth(r->calculatedPointRef)+1].fold(max)))
+    
+    return depth
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2021-10-26  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:hisFormulaInputs
+func
+src:
+  /*------------------------------------------------------------------------------
+    Return a list of non-calculated points which values are needed to calculate 
+    values for the given calculated point.
+    Recursive.
+    
+    Arguments: 
+    pointRef           Id of calculated point, calculated from hisFormula
+    ts                 Timestamp to determine active formula(s)
+    inputs             List of ids, input points
+  ------------------------------------------------------------------------------*/
+  
+  (pointRef, ts:now(), inputs:[]) => do
+    coeffCols: ["a","b","c","d","e","f","g","h","i","j","k","l","m",
+                "n","o","p","q","r","s","t","u","v","w","x","y","z"]
+    
+    // If pointRef does not have a corresponding formula, it is an input 
+    // and can be added to the upstream list
+    if (read(hisFormula and calculatedPointRef==pointRef, false)==null)
+      inputs= inputs
+      .add(pointRef)
+    
+    // Identify all formulas for pointRef and recursively process each coefficient
+    readAll(hisFormula and calculatedPointRef==pointRef and startDateTime <= ts
+            and (not endDateTime or endDateTime > ts))
+    .each(r => coeffCols.each(c =>
+      if (isRef(r[c]))
+        inputs= inputs
+        .addAll(hisFormulaInputs(r[c], ts))))
+    
+    inputs.unique()
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2023-07-27  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:hisFormulaLive
+func
+src:
+  /*------------------------------------------------------------------------------
+    Wrapper around hisFormulaCalc for use as hisFunc
+    
+    Arguments:
+    *** Typical arguments for hisFunc
+  ------------------------------------------------------------------------------*/
+  
+  (rec, dates, opts, yield) => do
+    // Call wrapped function
+    grid: hisFormulaCalc(rec, dates)
+    // Exit if empty or null
+    if (grid==null or isEmpty(grid)) return null
+    // Identify first column
+    colName: grid.removeCol("ts").colNames.first
+    // Yield calculated data
+    grid.each row => yield(row->ts, row[colName])
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2021-09-22  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:hisFormulaUpstream
+func
+src:
+  /*------------------------------------------------------------------------------
+    Return a list of calculated points a given calculated point is downstream of.
+    In other words, returns the list of calculated points which values are needed
+    to calculate values for the given calculated point.
+    Recursive.
+    
+    Arguments: 
+    calculatedPointRef     Id of calculated point, calculated from hisFormula
+    dependents             List of ids, upstream calculated points
+  ------------------------------------------------------------------------------*/
+  
+  (calculatedPointRef, upstream:[]) => do
+    coeffCols: ["a","b","c","d","e","f","g","h","i","j","k","l","m",
+                "n","o","p","q","r","s","t","u","v","w","x","y","z"]
+    
+    // If calculatedPointRef has a corresponding formula, it is indeed a 
+    // calculated point and can be added to the upstream list
+    if (read(hisFormula and calculatedPointRef==calculatedPointRef, false)!=null)
+      upstream= upstream
+      .add(calculatedPointRef)
+    
+    // Identify all formulas for calculatedPointRef and recursively process
+    // each coefficient
+    readAll(hisFormula and calculatedPointRef==calculatedPointRef)
+    .each(r => coeffCols.each(c =>
+      if (isRef(r[c]))
+        upstream= upstream
+        .addAll(hisFormulaUpstream(r[c]))))
+    
+    upstream.unique()
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2022-10-31  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:hisFormulaWrite
+func
+src:
+  /*------------------------------------------------------------------------------
+    Delete stored point history covered by span, recalculate and store.
+    This function calculates history for a virtual point using hisFormula records 
+    with calculatePointRef equal to the target virtual point.
+  
+    Arguments:
+    ptId
+    span
+   
+     Tags:
+    - virtual
+    --- hisFormulaWrite true
+    --- hisInterval
+    --- hisMissingVals (optional) hide / show / ignore
+    --- hisRecalculate (optional)
+  ------------------------------------------------------------------------------*/
+  
+  (ptId, span:null) => do
+    // Normalize inputs
+    rec: if (isRef(ptId)) readById(ptId) else ptId
+    if (span!=null) span= span.toSpan()
+    
+    // Reject points bound to connectors or with hisFormulaWrite == false
+    if (rec.has("connRef") or rec.has("elasticMetric")) return null
+    if (rec.missing("hisFormulaWrite") or not(rec->hisFormulaWrite)) return null
+    
+    // Load params from target point record
+    hisRecalculate: if (rec.has("hisRecalculate")) rec->hisRecalculate else 0s
+    
+    // If span is not provided, use target record's hisEnd
+    if (span==null)
+      // But if record doesn't have hisEnd, exit
+      if (rec.missing("hisEnd")) return null
+      // hisRecalculate applies to regular updates when span is not provided
+      // Last value at hisEnd will be removed and recalculated in any case
+      else span= (rec->hisEnd - hisRecalculate)..now()
+    // If span is provided, use as is
+    
+    // Erase existing history data, to be replaced
+    rec.hisRemove(span)
+  
+    // Split span if required
+    // Max 1 yr at a time to avoid running out of heap space
+    spans: []
+    spanStart: span.start()
+    spanEnd: span.end()
+    spanDuration: (spanEnd - spanStart).to(1hr)
+    maxSpanIncrement: 8760hr
+    if (spanDuration > maxSpanIncrement) do
+      increments: ceil(spanDuration / maxSpanIncrement).as(1)
+      (0..increments-1).each(i => do
+        chunkStart: spanStart + i * maxSpanIncrement
+        chunkEnd: spanStart + (i+1) * maxSpanIncrement
+        spans= spans.add(chunkStart..chunkEnd)
+      end)
+    else spans= spans.add(span)
+  
+    // Cycle through spans
+    spans.sort().each(chunk => do
+  
+      // Call hisFormulaCalc
+      try hisGrid: hisFormulaCalc(rec, chunk)
+      catch (ex) do
+        rec= commit(diff(rec, {hisErr: ex->dis}, {transient}))
+        return null
+      end
+  
+      // Test for empty or null grid
+      if (hisGrid==null or isEmpty(hisGrid)) return null
+  
+      // Avoid padding with NA
+      lastValid: hisGrid.hisFindAll(v => v != na()).foldCol("ts",foldMaxDatetime)
+  
+      // Filter out null values (can't hisWrite) and filter by
+      // timestamp to avoid duplicating any history point
+      try hisGrid
+          .hisFindAll((val, ts, his) => val != null
+                                        and ts >= chunk.start()
+                                        and ts < chunk.end()
+                                        and ts <= now()
+                                        and ts <= lastValid)
+          .hisWrite(rec)
+      catch (ex) do
+        rec= commit(diff(rec, {hisErr: ex->dis}, {transient}))
+        return null
+      end
+    end) // chunk
+  
+    // Mark point with information tags
+    try do
+      rec= commit(diff(rec, {hisSource: "hisFormulaWrite"}))
+      rec= commit(diff(rec, {-hisErr}, {transient}))
+    catch null
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2024-11-01  Raphael Vitti
+      Bug correction, now correctly using chunk.start and chunk.end to filter
+      hisGrid. Now using hisFindAll instead of findAll.
+    2024-10-28  Raphael Vitti
+      Added detection of last valid calculation to avoid padding with N/A values.
+      Operates on each chunk, which could mean missing NA values on long spans.
+    2023-07-31  Raphael Vitti
+      Removed "+ 1s" from calculation of span start based on hisEnd, to avoid
+      creating empty periods for hisRollup (e.g. 00:00:00 - 00:00:01 at chunk end)
+    2021-09-22  Raphael Vitti
+      Created from hisFormulaWrite.
+  ------------------------------------------------------------------------------*/
+---
+name:recDuplicateHisFormula
+func
+src:
+  /*------------------------------------------------------------------------------
+    Create new hisFormula record from another hisFormula record.
+    
+    Arguments: 
+    hisFormulaDict        Dict for new record with hisFormula template
+  ------------------------------------------------------------------------------*/
+  
+  (hisFormulaDict) => do
+    // Normalize action input
+    hisFormulaDict= actionNormInput(hisFormulaDict, "dict")
+  
+    // Load original dictionary based on id, this dict will contain
+    // all fields
+    originalDict: readById(hisFormulaDict->id)
+    
+    // Initialize new dictionary for our new record
+    newDict: originalDict
+  
+    // Any record present in deficiencyDict represents a change
+    // from the originalDict. Apply change to newDict.
+    hisFormulaDict.each((v,n) => do
+      newDict= newDict.set(n, v)
+    end)
+  
+    // Remove added info not in template
+    newDict= newDict
+    .set("debug", null)
+    .set("hisErr", null)
+  
+    // This will be a new record, remove "id" and "mod" fields
+    newDict= newDict
+    .remove("id")
+    .remove("mod")
+    
+    // Save record
+    recNewHisFormula(newDict)
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2021-10-26  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:recEditHisFormula
+func
+src:
+  /*------------------------------------------------------------------------------
+    Edit hisFormula record and set lastModifiedBy tag.
+    
+    Arguments: 
+    hisFormulaDict        Dict for record to edit, should match hisFormula
+                          template and contain id.
+  ------------------------------------------------------------------------------*/
+  
+  (hisFormulaDict) => do
+    // Normalize action input
+    rec: actionNormInput(hisFormulaDict, "dict")
+    
+    // Add lastModifiedBy
+    rec= rec
+    .set("lastModifiedBy", userCur()->dis)
+  
+    // Remove added info not in template
+    rec= rec
+    .set("debug", null)
+    .set("hisErr", null)
+  
+    // Validate record
+    rec= recValidateHisFormula(rec)
+  
+    recEdit(rec)
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2021-09-21  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:recNewHisFormula
+doc:"Create new record based on template, after normalization and validation. Also adds createdBy tag with user name."
+func
+src:
+  /*------------------------------------------------------------------------------
+    Create new hisFormula record and set createdBy tag.
+    
+    Arguments: 
+    hisFormulaDict        Dict for new record with hisFormula template
+  ------------------------------------------------------------------------------*/
+  
+  (hisFormulaDict) => do
+    // Normalize action input
+    rec: actionNormInput(hisFormulaDict, "dict")
+    
+    // Add createdBy
+    rec= rec
+    .set("createdBy", userCur()->dis)
+  
+    // Validate record
+    rec= recValidateHisFormula(rec)
+  
+    recNew(rec)
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2021-09-20  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:recNewHisFormulaPoint
+doc:
+  Create new hisFormula record and point record from one newHisFormulaPoint
+  input dict. A simple additive default formula is used as a starting point.
+    
+  Arguments:
+    newHisFormulaPointDict     Dict for new formula and point
+func
+src:
+  /*------------------------------------------------------------------------------
+    Create new hisFormula record and point record from one newHisFormulaPoint
+    input dict. A simple additive default formula is used as a starting point.
+    
+    Arguments:
+    newHisFormulaPointDict     Dict for new formula and point
+  ------------------------------------------------------------------------------*/
+  
+  (newHisFormulaPointDict) => do
+    // Normalize action input
+    rec: actionNormInput(newHisFormulaPointDict, "dict")
+  
+    // Create a point
+    newPtDict: {
+      navName: rec->navName,
+      disMacro: "\$equipRef \$navName",
+      equipRef: rec->equipRef,
+      spaceRef: rec->equipRef->spaceRef,
+      siteRef: rec->equipRef->siteRef,
+      his,
+      hisFormulaWrite: rec->hisFormulaWrite,
+      hisMissingVals: rec->hisMissingVals,
+      hisFunc: if (rec->hisFormulaWrite==false) "hisFormulaLive" else null,
+      hisRollupFunc: try rec->hisRollupFunc catch null,
+      hisInterval: rec->hisInterval,
+      hisRecalculate: if (rec->hisFormulaWrite==true) try rec->hisRecalculate
+                                                      catch 4hr
+                      else null,
+      kind: "Number",
+      point,
+      sensor,
+      tz: "Los_Angeles",
+      unit: try rec->unit catch null,
+      }
+   
+    newPtId: commit(diff(null, newPtDict, {add}))->id
+    
+    // Create formula record with default formula
+    coeffs: ["a","b","c","d","e","f","g","h","i","j","k","l","m",
+             "n","o","p","q","r","s","t","u","v","w","x","y","z"]
+    defaultFormula: "a+b+c+d+e+f+g+h+i+j+k+l+m+n+o+p+q+r+s+t+u+v+w+x+y+z"
+    defaultFormula= defaultFormula[0..(rec->sourcePointRefs.size*2 - 2)]
+  
+    newFormula: {
+      navName: "hisFormula",
+      calculatedPointRef: newPtId,
+      hisFormula: defaultFormula,
+      startDateTime: rec->startDateTime,
+      endDateTime: try rec->endDateTime catch null,
+      maxSpanIncrement: 1mo,
+      disMacro: "\$calculatedPointRef \$navName",
+      createdBy: userCur()->dis,
+      }
+  
+    rec->sourcePointRefs.each((sourcePointRef, i) =>
+      newFormula= newFormula.set(coeffs[i] ,sourcePointRef)
+    )
+      
+    recNew(newFormula)
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2021-09-21  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:recRecomputeHisFormula
+func
+src:
+  /*------------------------------------------------------------------------------
+    Recompute calculated point related to selected formula, plus all downstream
+    and upstream calculated points. Computing task takes care to start upstream
+    and increment downstream.
+    
+    Arguments: 
+    sel
+  ------------------------------------------------------------------------------*/
+  
+  (sel) => do
+    // Normalize action input
+    sel= actionNormInput(sel, "id")
+  
+    // Load formula record
+    rec: readById(sel)
+    
+    // Find all dependent (downstream) calculated points
+    downstreamRefs: hisFormulaDependents(rec->calculatedPointRef)
+    
+    // Find all upstream calculated points
+    upstreamRefs: hisFormulaUpstream(rec->calculatedPointRef)
+    
+    // Create list of points for which to clear history
+    hisRemoveRefs: downstreamRefs.addAll(upstreamRefs)
+    
+    // Clear history of points with hisFormulaWrite==true
+    hisRemoveRefs
+    .findAll(ref => readById(ref)["hisFormulaWrite"])
+    .each ptRef =>
+      hisRemove(ptRef, (rec->startDateTime..now()).toSpan)
+    
+    // Start task to recalculate
+    taskSend(readAll(task and taskExpr)
+             .find(r => r->taskExpr.contains("taskHisFormulaWrite")), 
+             {})
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2024-11-01  Raphael Vitti
+      Modified to find the correct task record rather than using a fixed ref.
+    2021-10-21  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:recTrashHisFormula
+func
+src:
+  /*------------------------------------------------------------------------------
+    Trash selected records. Also trash associated calculated points.
+    
+    Arguments:
+    refs        List of ids of selected records to trash
+  ------------------------------------------------------------------------------*/
+  
+  (refs) => do
+    // Normalize action input
+    refs= actionNormInput(refs, "ids")
+    recs: readByIds(refs)
+    
+    // Extract list of unique calculatedPointRefs, remove potential nulls
+    calculatedPointRefs: recs
+    .colToList("calculatedPointRef")
+    .unique()
+    .findAll(r => isRef(r) and (try isDict(readById(r)) catch false))
+    
+    // Trash selected hisFormula records
+    refs.recTrash()
+  
+    // Trash associated calculated points
+    if (not(isEmpty(calculatedPointRefs))) calculatedPointRefs.recTrash()
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2022-08-15  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:recValidateHisFormula
+doc:
+  Throw error if record tags don't meet the following conditions:
+  - Start datetime is before end datetime
+  
+func
+src:
+  /*------------------------------------------------------------------------------
+    Validate hisFormula record, throw error in the following cases:
+    - Start datetime is missing
+    - End datetime is before start datetime
+    
+    Arguments: 
+    rec          Dictionary to validate, should match hisFormula template
+  ------------------------------------------------------------------------------*/
+  
+  (rec) => do
+    // Merge with existing in case of edit action
+    recValidation: if (rec.has("id")) merge(readById(rec->id), rec)
+                   else rec
+  
+    // startDateTime is required
+    if (recValidation.missing("startDateTime"))
+      throw "startDateTime is required"
+  
+    // End must be after start
+    if (recValidation.has("endDateTime")
+        and recValidation->endDateTime != removeMarker()) do
+      startDT: recValidation->startDateTime
+      endDT: recValidation->endDateTime
+      if (startDT > endDT)
+        throw "end needs to be after start"
+    end
+      
+    return rec
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2021-09-20  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:taskHisFormulaWrite
+func
+src:
+  /*------------------------------------------------------------------------------
+    Compilation task for hisFormulaWrite activities, including error management
+    and logging
+  ------------------------------------------------------------------------------*/
+  
+  () => do
+    // Log, optional
+    logInfo("taskHisFormulaWrite", "Starting task")
+    
+    // Find points with hisFormulaWrite == TRUE
+    targets: readAll(point and his and hisFormulaWrite==true)
+  
+    // Add formula depth and reverse sort so deeper formulas are processed first
+    targets= targets
+    .addCol("depth", target => hisFormulaDepth(target->id))
+    .sortr((a,b) => a->depth <=> b->depth)
+  
+    // Cycle through each target point, 
+    targets.each ((target, i) => do
+      taskProgress({percent: round(100%*i/targets.size), cur:target.dis})
+      try do
+        // If point needs backfilling, provide span, else span is null
+        span: if (target.has("hisEnd")) null
+              else do
+                // Use earliest formula start date
+                formulas: readAll(hisFormula and calculatedPointRef==target->id)
+                // Skip point if coefficients are missing a start date
+                if (isEmpty(formulas) or formulas.missing("startDateTime"))
+                  return null
+                else
+                  // Span goes from first start date until now
+                  (formulas.colToList("startDateTime")
+                           .sort((a,b) => a <=> b)
+                           .first
+                   ..now())
+                end
+        // Call external function to write calculated historical data
+        hisFormulaWrite(target, span)
+        // Block until pending history writes are complete, to ensure downstream
+        // point histories get calculated properly
+        hisSync(1min)
+      end catch (ex) logErr("taskHisFormulaWrite",
+                            "Failed to update trend for " +
+                            target.dis()+ ": " + ex->dis)
+    end)
+    taskProgress({percent: 100%})
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2021-09-22  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:viHisFormulaDebug
+func
+src:
+  /*------------------------------------------------------------------------------
+    Display input trends used to calculate the given calculated point's values
+    over the given span. The beginning timestamp of the span is used to determine
+    the active formula(s) to use.
+    
+    Arguments: 
+    calculatedPointRef     Id of calculated point, calculated from hisFormula
+    span                   Span used for analysis
+    limit                  Number, limit for hisRead operations
+  ------------------------------------------------------------------------------*/
+  
+  (calculatedPointRef, span:lastMonth(), limit:1000000) => do
+    // Normalize span to datetime-span
+    span= span.toSpan
+    
+    // Load point info to determine calculation interval
+    hisInterval: readById(calculatedPointRef)->hisInterval
+    
+    // Retrieve all input points needed to calculate target point values
+    inputPointRefs: hisFormulaInputs(calculatedPointRef, span.toSpan.start)
+    
+    // Load input data
+    hisGrid: xq()
+    .xqReadByIds(inputPointRefs.add(calculatedPointRef))
+    .xqHisRead(span, {limit: limit})
+    .xqHisRollupAuto(hisInterval)
+    .xqExecute()
+    
+    // Exit if empty
+    if (isEmpty(hisGrid)) return {val:"No Data"}.toGrid
+    
+    // Highlight gaps
+    hisGrid= hisGrid
+    .toolHisGridShowGaps(hisInterval)
+    
+    // Length of span
+    l: (span.end - span.start).to("s")
+    
+    // Target number of values
+    tCount: floor(l / hisInterval.to("s")).to(1)
+    
+    // Initialize chartGroups
+    chartGroups: []
+    
+    // Calculate uptime per point
+    hisGrid.removeCol("ts").colNames.each(colName => do
+      his: hisGrid.col(colName).meta
+      count: hisGrid.hisClip.colToList(colName).findAll(v => isNumber(v)).size
+      uptime: count / tCount * 100.as("%")
+      chartGroup: uptime+his["unit"]
+      chartGroups= chartGroups.add(chartGroup)
+      hisGrid= hisGrid
+      .addColMeta(colName, {uptime: uptime,
+                            dis: his.dis() + " (" + round(uptime) + ")",
+                            chartGroup: chartGroup})
+    end)
+  
+    // Initialize presentation grid for chart
+    presentation: {}.toGrid
+  
+    // Order cols by uptime, and put calculatedPoint first
+    calculatedPointCol: hisGrid.removeCol("ts").colNames.find(
+      v => hisGrid.col(v).meta["id"] == calculatedPointRef)
+    orderedCols: hisGrid.removeCol("ts").colNames.sort(
+      (a,b) => hisGrid.col(a).meta->uptime <=> hisGrid.col(b).meta->uptime)
+    orderedCols= orderedCols.moveTo(calculatedPointCol, 0)
+  
+    // Fill out presentation grid in order
+    orderedCols.each((colName,i) => do
+      his: hisGrid.col(colName).meta
+      presentation= presentation
+      .addRow(
+      {x:           "ts",
+       y:           his["id"],
+       chartType:   "line",
+       chartGroup:  his["chartGroup"],
+       chartHeight: max(100,
+                        chartGroups.findAll(v => v==his["chartGroup"]).size * 15),
+       dis:         his["dis"],
+       strokeWidth: 2
+      })
+    end)
+    
+    // Return hisGrid
+    hisGrid.addMeta({presentation: presentation})
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2023-07-27  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:viHisFormulasList
+func
+src:
+  /*------------------------------------------------------------------------------
+    Create a table of hisFormula records formatted for display.
+    
+    Arguments: 
+    equipRef       Ref<equip>, optional, target equipRef filter
+    debugViewStr   Str, view name used for debug uri
+    filterStr      Str, apply filter to calculated point dis and formula navName
+  ------------------------------------------------------------------------------*/
+  
+  (nodeRef:null, debugViewStr:"viHisFormulaDebug", filterStr:null) => do
+    node: try readById(nodeRef) catch null
+    
+    grid: if (node==null)
+            readAll(hisFormula)
+          else if (node.has("space")) 
+            readAll(hisFormula and calculatedPointRef->spaceRef==nodeRef)
+          else
+            readAll(hisFormula and calculatedPointRef->equipRef==nodeRef)
+  
+    coeffCols: ["a","b","c","d","e","f","g","h","i","j","k","l","m",
+                "n","o","p","q","r","s","t","u","v","w","x","y","z"]
+  
+    // Filter
+    if (filterStr != null and isStr(filterStr))
+      grid= grid.findAll(row => do
+          coeffsStr: ""
+          coeffCols.each(coeffCol => coeffsStr = coeffsStr + " " + row[coeffCol])
+          reMatches("(?i).*"+filterStr+".*",
+            row["calculatedPointRef"].refDis + " " + row["navName"] + coeffsStr)
+        end)
+  
+    // Exit if empty
+    if (isEmpty(grid)) do
+      emptyMsg: "Found no formula records. Check display filters or create " +
+                "formula record."
+      return {empty: emptyMsg}.toGrid.addMeta({noData: emptyMsg})
+    end
+  
+    /*----------------------------------------------------------------------------
+    // Manage external references
+    ----------------------------------------------------------------------------*/
+    // List of external references
+    externIds: grid.colToList("calculatedPointRef")
+    coeffCols.each colName =>
+      try
+        externIds= externIds
+        .addAll(grid.colToList(colName).findAll(v => isRef(v)))
+      catch 
+        null
+    
+    // Query the references
+    externRecs: xq()
+    .xqReadByIds(externIds)
+    .xqExecute()
+  
+    // Update local extern records
+    externRecs.each rec => try externUpdate(rec->id, {dis: rec.dis()}) catch null
+  
+    /*----------------------------------------------------------------------------
+    // Add columns
+    ----------------------------------------------------------------------------*/
+    // Add hisErr and hisComputeStatus
+    grid= grid
+    .addCol("hisErr", r => try readById(r->calculatedPointRef)->hisErr
+                           catch null)
+  
+    // Add debug link
+    grid= grid
+    .addCol("debug", r => try
+      uiLink({view: debugViewStr,
+              state:{calcPtRef: r->calculatedPointRef,
+                     span: if (r.has("endDateTime"))
+                             (r->endDateTime-1day..r->endDateTime).toSpan
+                           else yesterday().toSpan(),
+                     limit: 100000,
+                     maxGap: r->calculatedPointRef->hisInterval}})
+      catch null)
+    .addColMeta("debug",
+                {dis: "Link",
+                 format:"Debug View"})
+    
+    // Display
+    disCols: ["calculatedPointRef","navName","hisFormula",
+              "startDateTime","endDateTime","hisErr","debug"]
+             .addAll(coeffCols)
+              
+    grid
+    .toolFormatGrid(disCols)
+    .sort((a,b) =>
+      (try readById(a->calculatedPointRef).dis() + a["startDateTime"] catch null)
+      <=>
+      (try readById(b->calculatedPointRef).dis() + b["startDateTime"] catch null))
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2024-11-01  Raphael Vitti
+      Removed calculation of formula depth, which slows down display excessively.
+    2021-09-20  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/

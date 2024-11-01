@@ -1,0 +1,28 @@
+dis:Formula Debug
+appName:builder
+order:3045
+view:viHisFormulaDebug
+src:
+  view: {inherit:"chart"}
+  calcPtRef: {var kind:"Ref<point>" input}
+  span: {var kind:"Span" input defExpr:"pastWeek().toSpan()"}
+  limit: {var kind:"Str" defVal:"1000000"}
+  data: {expr:"viHisFormulaDebug({{calcPtRef}},{{span}},{{limit}})"}
+  
+---
+dis:Formulas
+appName:builder
+order:3000
+view:viHisFormulasBList
+src:
+  view: {inherit:"table"}
+  equipRef: {var kind:"Ref<equip>" input defExpr:"null"}
+  debugViewStr: {var kind:"Str" defVal:"viHisFormulaDebug"}
+  filter: {var kind:"Str" input defVal:""}
+  add: {dis:"Add" refresh action:"recNewHisFormula" templateName:"hisFormula"}
+  edit: {dis:"Edit" refresh action:"recEditHisFormula" templateName:"hisFormula" select}
+  duplicate: {dis:"Duplicate" refresh action:"recDuplicateHisFormula" templateName:"hisFormula" select}
+  trash: {dis:"Trash" multi confirm:{dis:"Moving formulas and points to trash" details:"Formula records and associated calculated point records will be moved to the trash. Click yes to continue."} refresh action:"recTrashHisFormula" select}
+  newPt: {dis:"New Calculated Point" refresh action:"recNewHisFormulaPoint" templateName:"newHisFormulaPoint"}
+  recompute: {dis:"Recompute" action:"recRecomputeHisFormula" refresh select}
+  data: {expr:"viHisFormulasList({{equipRef}},{{debugViewStr}},{{filter}})"}

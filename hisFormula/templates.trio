@@ -1,0 +1,56 @@
+dis:His Formula
+tags:
+  navName: {kind:"Str" defVal:"hisFormula"}
+  calculatedPointRef: {kind:"Ref<point>"}
+  hisFormula: {kind:"Str" defVal:"a+b+c"}
+  startDateTime: {kind:"DateTime" defVal:2019-01-01T00:00:00-08:00 Los_Angeles}
+  endDateTime: {kind:"DateTime" optional}
+  maxSpanIncrement: {kind:"Number" optional defVal:7day}
+  a: {kind:"Ref<point>" navCluster optional}
+  b: {kind:"Ref<point>" navCluster optional}
+  c: {kind:"Ref<point>" navCluster optional}
+  d: {kind:"Ref<point>" navCluster optional}
+  e: {kind:"Ref<point>" navCluster optional}
+  f: {kind:"Ref<point>" navCluster optional}
+  g: {kind:"Ref<point>" navCluster optional}
+  h: {kind:"Ref<point>" navCluster optional}
+  i: {kind:"Ref<point>" navCluster optional}
+  j: {kind:"Ref<point>" navCluster optional}
+  k: {kind:"Ref<point>" navCluster optional}
+  l: {kind:"Ref<point>" navCluster optional}
+  m: {kind:"Ref<point>" navCluster optional}
+  n: {kind:"Ref<point>" navCluster optional}
+  o: {kind:"Ref<point>" navCluster optional}
+  p: {kind:"Ref<point>" navCluster optional}
+  q: {kind:"Ref<point>" navCluster optional}
+  r: {kind:"Ref<point>" navCluster optional}
+  s: {kind:"Ref<point>" navCluster optional}
+  t: {kind:"Ref<point>" navCluster optional}
+  u: {kind:"Ref<point>" navCluster optional}
+  v: {kind:"Ref<point>" navCluster optional}
+  w: {kind:"Ref<point>" navCluster optional}
+  x: {kind:"Ref<point>" navCluster optional}
+  y: {kind:"Ref<point>" navCluster optional}
+  z: {kind:"Ref<point>" navCluster optional}
+  disMacro: {kind:"Str" hidden defVal:"$calculatedPointRef $navName"}
+  createdBy: {kind:"Str" hidden}
+  lastModifiedBy: {kind:"Str" hidden}
+  debug: {optional hidden}
+  hisErr: {optional hidden}
+  depth: {optional hidden}
+template:hisFormula
+---
+dis:His Formula New Point
+tags:
+  equipRef: {kind:"Ref<equip>"}
+  sourcePointRefs: {kind:"Ref<point>[]" navCluster}
+  navName: {kind:"Str" defVal:"New Calculated Point"}
+  unit: {kind:"Str"}
+  hisInterval: {kind:"Number" defVal:5min}
+  hisMissingVals: {kind:"Str" enum:"show,hide" defVal:"show"}
+  hisFormulaWrite: {kind:"Bool" defVal:F}
+  hisRecalculate: {kind:"Number" defVal:4hr optional}
+  hisRollupFunc: {kind:"Str" enum:"avg,sum,min,max" defVal:"avg" optional}
+  startDateTime: {kind:"DateTime" defVal:2020-01-01T00:00:00-09:00 Los_Angeles}
+  endDateTime: {kind:"DateTime" optional}
+template:newHisFormulaPoint
