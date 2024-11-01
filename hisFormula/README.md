@@ -35,7 +35,7 @@ The `New Calculated Point` action creates a point and an associated formula.
 - `unit` of the point
 - `hisInterval` is the rollup interval at which the calculation is performed
 - `hisMissingVals` "Show" fills up missing data with `NA` values, "Hide" leaves them as `null`
-- `hisFormulaWrite` identifies points for which the calculated history is written to the time series database, which requires a task (see below)
+- `hisFormulaWrite` identifies points for which the calculated history is written to the time series database (see below for required task)
 - `hisRecalculate` defines the "hot period" over which written values are erased and recalculated every time the task runs
 - `hisRollupFunc` identifies the rollup function that applies to the new calculated point
 - `startDateTime` is the timestamp after which the formula is valid
