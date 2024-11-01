@@ -1,5 +1,6 @@
 ![Main hisAlarm view with examples](./assets/hisAlarm_main_view_example.jpg)
 
+# Copyright Notice
   Haxall and Haystack Data Analysis for Building Operations (Data Analysis for
   Operations) Copyright (c) 2023, The Regents of the University of California,
   through Lawrence Berkeley National Laboratory (subject to receipt of any
@@ -17,7 +18,7 @@
   works, and perform publicly and display publicly, and to permit others to do 
   so.
 
-# hisAlarm
+# Module hisAlarm
 History-based alarms, for typical time scales ranging from 15 minutes to several days, with email notifications.
 
 Includes trio files with all required records, including app, view, templates, funcs and defs. A compiled pod is
