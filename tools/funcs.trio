@@ -1,3 +1,52 @@
+name:foldMaxDatetime
+func
+src:
+  /*------------------------------------------------------------------------------
+    Fold function with arity of two (val, acc) for Datetime streams, which returns
+    the latest (most recent) datetime in the stream.
+    
+    Arguments: 
+    *** Typical arguments for fold functions with arity of two
+  ------------------------------------------------------------------------------*/
+  (val, acc) => do
+    if (val == foldStart()) {ts: null}
+    else if (val == foldEnd()) acc["ts"]
+    else if (val == na() or acc["ts"]==na()) {ts: na()}
+    else if (val == null) acc
+    else if (val > acc["ts"]) {ts: val}
+    else acc
+  end
+  /*------------------------------------------------------------------------------
+    Updates
+    2024-10-28  Raphael Vitti
+      Created.
+  ------------------------------------------------------------------------------*/
+---
+name:maxDatetime
+func
+src:
+  /*--------------------------------------------------------------------------------------------------
+    Simple max function that can be applied to two DateTime values, returns the most recent DateTime.
+  --------------------------------------------------------------------------------------------------*/
+  
+  (a,b) => do
+    if (a > b) a
+    else b
+  end
+  
+---
+name:minDatetime
+func
+src:
+  /*--------------------------------------------------------------------------------------------------
+    Simple min function that can be applied to two DateTime values, returns the oldest DateTime.
+  --------------------------------------------------------------------------------------------------*/
+  
+  (a,b) => do
+    if (a < b) a
+    else b
+  end
+---
 name:toolFormatGrid
 doc:
   Reorders grid columns based on the order of provided column names, and hides all other columns.
@@ -49,3 +98,150 @@ src:
     2022-09-01  Raphael Vitti
       Updated header and footer.
   --------------------------------------------------------------------------------------------------*/
+---
+name:toolHisGridShowGaps
+func
+src:
+  /*------------------------------------------------------------------------------
+    For a given history grid, detect data gaps longer than the given threshold
+    and insert NA() value to show gap. Only process points that match provided
+    filter, which by default excludes cov trends.
+    
+    Arguments:
+    hisGrid         History grid to analyze
+    maxGap          Number (time), longest allowed gap between readings
+    tagsFilter      Only highlight gaps in points that match filter
+  ------------------------------------------------------------------------------*/
+  
+  (hisGrid, maxGap:1min,
+   tagsFilter:"(not hisMode or hisMode!=\"cov\") and kind==\"Number\"") => do
+    
+    // Default to 15 min
+    if (not(isNumber(maxGap))) maxGap= 15min
+    
+    // For longer intervals, use intervals allowed by hisRollup func
+    if (maxGap >= 1yr) maxGap= 1yr
+    else if (maxGap >= 3mo) maxGap= 3mo
+    else if (maxGap >= 1mo) maxGap= 1mo
+    else if (maxGap >= 1wk) maxGap= 1wk
+    else if (maxGap >= 1day) maxGap= 1day
+    
+    // Create filter from tagsFilter string
+    filterFunc: filterToFunc(tagsFilter.parseFilter)
+  
+    // Determine selected grid and remaining grid
+    selColNames: hisGrid.removeCol("ts").colNames
+                 // Only highlight gaps in points that match filter
+                 .findAll(colName =>
+                   filterFunc(hisGrid.col(colName).meta))
+                 // Unselect columns with only null or na() values
+                 .findAll(colName =>
+                   hisGrid.colToList(colName)
+                          .any v => (v != null and v != na()))
+    // Selected grid is the grid in which data gaps will be analyzed
+    selGrid: hisGrid.keepCols(["ts"].addAll(selColNames))
+                    .findAll(row => row.remove("ts").any(v => v!= null))
+    // Remaining grid columns will be passed through "as is"
+    remGrid: hisGrid.removeCols(selColNames)
+                    .findAll(row => row.remove("ts").any(v => v!= null))
+  
+    // Modify columns in selected grid to default to avg rollup if id missing
+    selColNames.each(colName =>
+      if (hisGrid.col(colName).meta.missing("id"))
+        selGrid= selGrid.addColMeta(colName, {id:@a, hisRollupFunc:"avg"}))
+  
+    // Add NAN for detected gaps in selected grid
+    nanGrid: selGrid
+             .hisRollupAuto(maxGap)
+             .addMeta({hisKeepEmptyCols: marker()})
+             .hisMap(v => if (v==null) return na()
+                          else return v)
+             .findAll(row => row.any(v => v==na()))
+  
+    selGrid= selGrid
+             .addRows(nanGrid)
+             // After adding NaN rows, resort by chronological order
+             .sort((a,b) => a["ts"] <=> b["ts"])
+    selGrid= selGrid.reorderCols(selGrid.colNames.moveTo("ts",0))
+    
+    // Merge selected and remaining grids back and return
+    try return hisJoin([selGrid,remGrid])
+    catch return hisGrid
+  end
+  
+  /*------------------------------------------------------------------------------
+    Updates
+    2020-03-30  Raphael Vitti
+      Added header and footer.
+    2020-05-12  Raphael Vitti
+      Commented one section in order to attempt and increase speed. Replaced
+      folding function with built-in "avg", faster than custom "foldSample",
+      and replaced map with hisMap.
+    2020-08-10  Raphael Vitti
+      Added hisClip as very partial fix for the following issue: this function
+      currently replaces values in valid trends with their x-minute average on
+      the x-minute mark, with x being maxGap, creating artifical spikes.
+      In 3.0.25, it will be allowed to use the hisKeepEmptyCols tag to keep
+      empty cols during a hisMap or a hisFindAll, which should allow for
+      improving this algorithm by doing a hisMap to null instead of v during
+      gap detection. This might remove valid values on the x-minute mark, but
+      will be better than spikes.
+    2020-08-11  Raphael Vitti
+      Modified to use hisKeepEmptyCols and map valid average values to null in
+      order to avoid spikes from, say, 15-minute averages to show in final
+      non-rolled-up trends. This removes valid values in some cases.
+    2020-08-12  Raphael Vitti
+      Using foldSample instead of avg in rollup, with new foldSample, returns
+      the first valid sample, which is the same as replaced value if timestamps
+      align. Removed hisClip, which could remove useful data for COV trends.
+  ------------------------------------------------------------------------------*/
+---
+name:foldSample
+doc:
+  Fold function with arity of two (val, acc) for Number streams, which returns the first valid Number value encountered in the stream. It returns null if the entire stream is null, and na() if any value in the stream is na().
+    
+  Arguments: 
+  *** Typical arguments for fold functions with arity of two
+func
+src:
+  /*------------------------------------------------------------------------------
+    Copyright 2020 Raphael Vitti
+    
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+  
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+    GNU General Public License for more details.
+  
+    You should have received a copy of the GNU General Public License
+    along with this program. If not, see <https://www.gnu.org/licenses/>.
+  ------------------------------------------------------------------------------*/
+  /*------------------------------------------------------------------------------
+    Fold function with arity of two (val, acc) for Number streams, which returns
+    the first valid Number value encountered in the stream. It returns null if
+    entire stream is null, and na() if any value in the stream is na().
+    
+    Arguments: 
+    *** Typical arguments for fold functions with arity of two
+  ------------------------------------------------------------------------------*/
+  (val, acc) => do
+    if (val == foldStart()) {v0: null}
+    else if (val == foldEnd()) acc["v0"]
+    else if (val == na() or acc["v0"]==na()) {v0: na()}
+    else if (val == null or acc["v0"]!=null) acc
+    else {v0: val}
+  end
+  /*------------------------------------------------------------------------------
+    Updates
+    2020-03-30  Raphael Vitti
+      Added copyright and license information.
+    2020-08-12  Raphael Vitti
+      Transmit acc if it already contains a non-null and 
+      non-na value.
+    2020-08-19  Raphael Vitti
+      Optimized by removing "return" instructions and using elseif
+  ------------------------------------------------------------------------------*/
