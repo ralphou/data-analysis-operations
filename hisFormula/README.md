@@ -25,6 +25,8 @@ Calculated histories based on configurable formula records.
 Includes trio files with all required records, including views, templates and funcs. A compiled pod is
 also available, tested with version 3.1.10.
 
+The main configuration view is located in the default Builder app, and is labeled "Formulas".
+
 For points with calculated histories stored in the time series database, a task needs to be configured
 to call `taskHisFormulaWrite()` regularly, for example every 60 minutes.
 
