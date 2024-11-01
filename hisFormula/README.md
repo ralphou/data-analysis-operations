@@ -18,7 +18,7 @@
   works, and perform publicly and display publicly, and to permit others to do 
   so.
 
-# Module hisFormula
+# Module: hisFormula
 Calculated histories based on configurable formula records.
 
 **Warning**: Calculated points count against a server's SkySpark license.
