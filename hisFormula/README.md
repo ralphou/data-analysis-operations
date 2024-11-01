@@ -28,8 +28,24 @@ also available, tested with version 3.1.10.
 
 The main configuration view is located in the default Builder app, and is labeled "Formulas".
 
+The `New Calculated Point` action creates a point and an associated formula.
+- equipRef to locate the new, calculated point
+- sourcePointRefs to identify all the required points for the formula
+- navName of the new, calculated point
+- unit of the point
+- hisInterval is the rollup interval at which the calculation is performed
+- hisMissingVals "Show" fills up missing data with `NA` values, "Hide" leaves them as `null`
+- hisFormulaWrite identifies points for which the calculated history is written to the time series database, which requires a task (see below)
+- hisRecalculate defines the "hot period" over which written values are erased and recalculated every time the task runs
+- hisRollupFunc identifies the rollup function that applies to the new calculated point
+- startDateTime is the timestamp after which the formula is valid
+- endDateTime is the timestamp after which the formula is no longer valid
+
 For points with calculated histories stored in the time series database, a task needs to be configured
 to call `taskHisFormulaWrite()` regularly, for example every 60 minutes.
+
+Multiple formulas for the same calculated point are possible. Use `startDateTime` and `endDateTime` to apply the formulas over the correct period. 
+In case several formulas overlap, they all get calculated and the average of the results is returned during the overlap period.
 
 ![Task view with example](./assets/hisFormula_task_example.jpg)
 
