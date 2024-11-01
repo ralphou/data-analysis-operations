@@ -16,5 +16,5 @@
   works, and perform publicly and display publicly, and to permit others to do 
   so.
 
-# Module tools
+# Module: tools
 Generic tools used in Data Analysis for Operations.
