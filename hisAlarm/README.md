@@ -21,6 +21,8 @@
 # Module: hisAlarm
 History-based alarms, for typical time scales ranging from 15 minutes to several days, with email notifications.
 
+Requires setting up `Settings / Email` with an SMTP server and account.
+
 Includes trio files with all required records, including app, view, templates, funcs and defs. A compiled pod is
 also available, tested with version 3.1.10.
 
