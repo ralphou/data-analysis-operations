@@ -26,7 +26,7 @@ also available, tested with version 3.1.10.
 For points with calculated histories stored in the time series database, a task needs to be configured
 to call `taskHisFormulaWrite()` regularly, for example every 60 minutes.
 
-![Task view with example](./assets/hisFormula_task.jpg)
+![Task view with example](/assets/hisFormula_task.jpg)
 
 # Dependencies
 Extension `tools` is required.
