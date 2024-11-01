@@ -4,7 +4,7 @@ Haxall and Haystack Data Analysis for Building Operations.
 ![Main hisAlarm view with examples](./hisAlarm/assets/hisAlarm_main_view_example.jpg)
 
 Currently includes the following modules:
-- **hisAlarm** - Generate automated emails based on trends. Tests on consecutive rollup periods are used to reduce false positives. One additional condition can also be applied, for example to exclude periods with high outside air temperature.
+- **hisAlarm** - Generate automated emails based on trends. Tests on consecutive rollup periods are used to reduce false positives. One additional condition can also be applied, for example to exclude periods with high outside air temperatures.
 - **hisFormula** - Calculated histories, either live or written into the time series database. Up to 26 data sources per formula. Formulas can be modified over time for a given calculated point. Cluster-aware.
 
 # Copyright Notice
