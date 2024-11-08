@@ -27,9 +27,9 @@ Alarms are triggered when the target trend, after applying the desired rollup, m
 a given number of successive periods.
 
 For example, a water meter consumption exceeds 100 gallons per hour for 3 hours in a row.
-`hisRollupInterval: 1hr`
-`alarmCondition: ">100gal"`
-`consecutiveRepeats: 3`
+- `hisRollupInterval: 1hr`
+- `alarmCondition: ">100gal"`
+- `consecutiveRepeats: 3`
 
 Requires configuring `Settings / Email` with an SMTP server and account.
 
