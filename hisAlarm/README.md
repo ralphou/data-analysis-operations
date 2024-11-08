@@ -39,5 +39,7 @@ also available, tested with version 3.1.10.
 For automated alarming, a task needs to be configured to call `taskUpdateAlarms()` regularly, for example
 every 5 minutes.
 
+![Sample task screenshot](./assets/hisAlarm_task.jpg)
+
 # Dependencies
 Extension `tools` is required.
