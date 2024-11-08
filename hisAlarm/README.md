@@ -31,10 +31,12 @@ For example, a water meter consumption exceeds 300 gallons every hour for 15 hou
 - `alarmCondition: ">300gal"`
 - `consecutiveRepeats: 15`
 
-Requires configuring `Settings / Email` with an SMTP server and account.
+The configuration screen includes a trend viewer to support tuning the settings of each alarm based on historical trends.
 
 Includes trio files with all required records, including app, view, templates, funcs and defs. A compiled pod is
 also available, tested with version 3.1.10.
+
+Requires configuring `Settings / Email` with an SMTP server and account.
 
 For automated alarming, a task needs to be configured to call `taskUpdateAlarms()` regularly, for example
 every 5 minutes.
