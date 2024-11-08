@@ -31,6 +31,10 @@ For example, a water meter consumption exceeds 300 gallons every hour for 15 hou
 - `alarmCondition: ">300gal"`
 - `consecutiveRepeats: 15`
 
+One additional condition can also be applied, for example to exclude periods with high outside air temperatures.
+- `additionalPointRef: @abc:xyz Outside Air Temperature`
+- `additionalCondition: "<75°F"`
+
 The configuration screen includes a trend viewer to support tuning the settings of each alarm based on historical trends.
 
 Includes trio files with all required records, including app, view, templates, funcs and defs. A compiled pod is
