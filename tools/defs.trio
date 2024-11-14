@@ -2,3 +2,8 @@ def:^package
 doc:Name of custom package the record belongs to
 is:[^str]
 tagOn:[^func,^template,^view,^app,^def]
+---
+def:^references
+doc:"List of strings used to generate URI links. Each string can be either an Axon query or a URI. Typically used to provide a reference to relevant charts, tables or views."
+is:[^list]
+of:^str

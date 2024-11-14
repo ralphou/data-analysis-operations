@@ -196,6 +196,56 @@ src:
       align. Removed hisClip, which could remove useful data for COV trends.
   ------------------------------------------------------------------------------*/
 ---
+name:toolSkySparkLink
+doc:
+  Generate a uri to a SkySpark view, from a string that represents either:
+  - an axon query, in which case a link to Shell is generated, pre-filled with the query
+  - a view uri, in which case the uri is simply parsed and otherwise returned as is
+    
+  If html input is true, format as html <a> hyperlink
+    
+  Inspired by toolConvertAxonQueryToUrl function by Daniel Imperiale 4/23/2021
+func
+src:
+  /*--------------------------------------------------------------------------------------------------
+    Generate a uri to a SkySpark view, from a string that represents either:
+    - an axon query, in which case a link to Shell is generated, pre-filled with the query
+    - a view uri, in which case the uri is simply parsed and otherwise returned as is
+    
+    If html input is true, format as html <a> hyperlink
+    
+    Inspired by toolConvertAxonQueryToUrl function by Daniel Imperiale 4/23/2021
+  --------------------------------------------------------------------------------------------------*/
+  
+  (axonQuery, html:false) => do
+    // Check query with eval
+    // If it succeeds, continue and provide link to shell pre-filled with query
+    try eval(axonQuery)
+    // If it fails, consider input is a uri, return it formatted as uri or html
+    catch do
+      if (html) do
+        // Try to identify view name for display, if it is a SkySpark link
+        dis: try reGroups(".*\\?view=(\\w+)&.*", axonQuery)[1]
+             catch try reGroups(".*\\/\\/(\\w+)\\..*", axonQuery)[1]
+                   catch "Link"
+        return "<a href=" + axonQuery + ">" + dis + "</a>"
+      else return axonQuery.parseUri()
+    end
+    
+    // If a his function is used and view meta isn't specified in query, display as chart
+    // Else let Shell decide on the default
+    tab: if (axonQuery.contains("his") and not axonQuery.contains("view")) "chart"
+         else null
+         
+    // Build request dict
+    req: {view: "shell",
+          state: {expr: axonQuery, tab: tab}}
+          
+    // Generate and return relative uri
+    if (html) "<a href=" + uiLinkAbs(req) + ">Shell</a>"
+    else uiLink(req)
+  end
+---
 name:foldSample
 doc:
   Fold function with arity of two (val, acc) for Number streams, which returns the first valid Number value encountered in the stream. It returns null if the entire stream is null, and na() if any value in the stream is na().
@@ -204,22 +254,6 @@ doc:
   *** Typical arguments for fold functions with arity of two
 func
 src:
-  /*------------------------------------------------------------------------------
-    Copyright 2020 Raphael Vitti
-    
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-  
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-    GNU General Public License for more details.
-  
-    You should have received a copy of the GNU General Public License
-    along with this program. If not, see <https://www.gnu.org/licenses/>.
-  ------------------------------------------------------------------------------*/
   /*------------------------------------------------------------------------------
     Fold function with arity of two (val, acc) for Number streams, which returns
     the first valid Number value encountered in the stream. It returns null if
@@ -237,11 +271,46 @@ src:
   end
   /*------------------------------------------------------------------------------
     Updates
-    2020-03-30  Raphael Vitti
-      Added copyright and license information.
     2020-08-12  Raphael Vitti
       Transmit acc if it already contains a non-null and 
       non-na value.
     2020-08-19  Raphael Vitti
       Optimized by removing "return" instructions and using elseif
   ------------------------------------------------------------------------------*/
+---
+name:toolConvertAxonQueryToUrl
+func
+src:
+  /*
+    
+    Converts an axon query string into a URL. Primarily used when I email out alerts
+    
+    Daniel Imperiale 4/23/2021
+    
+  */
+  
+  (axonQuery) => do
+    // Check query with eval
+    // If it succeeds, continue and provide link to shell pre-filled with query
+    try eval(axonQuery)
+    // If it fails, consider input is a uri, return it formatted as uri
+    catch return axonQuery.parseUri
+  
+    // If a his function is used and view meta isn't specified in query, display as chart
+    // Else let shell decide on the default
+    tab: if (axonQuery.contains("his") and not axonQuery.contains("view")) "chart"
+         else null
+         
+    // Build request dict
+    req: {view: "shell",
+          state: {expr: axonQuery, tab: tab}}
+          
+    // Generate and return relative uri
+    uiLink(req)
+    
+    /*urlBase: "https://skyspark-prod.ucdavis.edu/ui/ucdavis?view=shell&state="
+  
+    convertString: "{tab:\"chart\" expr:\"" + axonQuery.replace("\"", "\\\"") + "\"}"
+  
+    return urlBase + ioToBase64(convertString, {uri})*/
+  end
