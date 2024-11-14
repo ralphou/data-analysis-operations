@@ -52,4 +52,4 @@ every 5 minutes.
 ![Sample task screenshot](./assets/hisAlarm_task.jpg)
 
 # Dependencies
-Extension `tools` is required.
+Extension ![tools](../tools/) is required.
