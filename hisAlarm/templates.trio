@@ -6,6 +6,7 @@ tags:
   consecutiveRepeats: {kind:"Number" unitless defVal:12}
   emails: {kind:"Str[]" defVal:["xyz0@aaa.bcd","xyz1@aaa.bcd","xyz2@aaa.bcd"]}
   description: {kind:"Str" optional}
+  references: {kind:"Str[]" optional}
   additionalPointRef: {kind:"Ref<point>" navAuxFilter:"his" optional}
   additionalCondition: {kind:"Str" optional}
   state: {hidden}
@@ -22,6 +23,7 @@ tags:
   consecutiveRepeats: {kind:"Number" unitless defVal:12}
   emails: {kind:"Str[]" defVal:["xyz0@aaa.bcd","xyz1@aaa.bcd","xyz2@aaa.bcd"]}
   description: {kind:"Str" optional}
+  references: {kind:"Str[]" optional}
   additionalPointRef: {kind:"Ref<point>" navAuxFilter:"his" optional}
   additionalCondition: {kind:"Str" optional}
   mod: {kind:"DateTime" hidden}

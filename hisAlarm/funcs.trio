@@ -269,43 +269,59 @@ src:
       title: try titleGrid.find(r => r->email==email)["title"] catch null
       if (title==null) title= "SkySpark Trend Alarms"
       
-      // Updates are generated for new alarms, cleared alarms, and old previously-reported alarms
-      updateGrid: readAll(emailAlarm and email==email
-                          and (emailSent==false 
-                               or (emailAlarm==true and emailSentDateTime<now()-3day))
-                         )
-                          
-      // Only proceed if there are updates or reminders to send
-      if (isEmpty(updateGrid)) return null
-      // Create update strings for new alarms, previously reported alarms and cleared alarms
+      // Emails are sent only for new or cleared alarms, or if a reminder hasn't been sent in 3 days
+      sendEmail: readAll(emailAlarm and email==email
+                         and (emailSent==false 
+                              or (emailAlarm==true and emailSentDateTime<now()-3day))).size > 0
+  
+      // If an email is sent, include all active alarms and newly cleared alarms
+      updateGrid: readAll(emailAlarm and email==email and (emailSent==false or emailAlarm==true))
+  
+      // Generate compiled html links, including default link to configuration and debug view
+      updateGrid= updateGrid
+      .addCol("htmlLinks", r => do
+        references: try r->references.map(s => toolSkySparkLink(s, true)).concat (" - ") + " - "
+                    catch ""
+        defReq: {view: "alarms", state: {alarmConfig: {selectedId: r->alarmConfigRef}}}
+        references + "<a href=" + uiLinkAbs(defReq) + ">Configuration</a>"
+      end)
+  
+      // Exit if there are no updates or reminders to send
+      if (not(sendEmail)) return null
+      // Create formatted updates for new alarms, previously reported alarms and cleared alarms
       else do
         newFlags: updateGrid.findAll(r => r->emailAlarm and r->emailSent==false)
         newFlagsStr: if (isEmpty(newFlags)) null
-                     else "-- " + newFlags.colToList("dis").concat(",\n-- ")
+                     else "<li>" + newFlags.map(r => {str: r->dis + " - " + r->htmlLinks})
+                                           .colToList("str").concat("</li><li>") + "</li>"
                        
-        exFlags: readAll(emailAlarm==true and emailSent==true and email==email)
+        exFlags: updateGrid.findAll(r => r->emailAlarm and r->emailSent==true)
         exFlagsStr: if (isEmpty(exFlags)) null
-                    else try "-- " + exFlags.colToList("disReminder").concat(",\n-- ")
-                         catch "-- " + exFlags.colToList("dis").concat(",\n-- ")
+                    else "<li>" + exFlags.map(r => {str: (try r->disReminder catch r->dis) 
+                                                         + " - " + r->htmlLinks})
+                                         .colToList("str").concat("</li><li>") + "</li>"
                                
         clearedFlags: updateGrid.findAll(r => not(r->emailAlarm))
         clearedFlagsStr: if (isEmpty(clearedFlags)) null
-                         else "-- " + clearedFlags.colToList("dis").concat(",\n-- ")
+                         else "<li>" + clearedFlags.map(r => {str: r->dis + " - " + r->htmlLinks})
+                                                   .colToList("str").concat("</li><li>") + "</li>"
         
         // Create body of email
+        emailHeader: "<html>"
+        emailFooter: "</html>"
         emailStr: ""
         if (newFlagsStr != null)
           emailStr= emailStr
-          + "New alarms:\n"
-          + newFlagsStr + "\n\n"
+          + "New alarms:<div><ul>"
+          + newFlagsStr + "</ul></div><br>"
         if (clearedFlagsStr != null)
           emailStr= emailStr
-          + "Recovery - Back to normal conditions for:\n"
-          + clearedFlagsStr + "\n\n"
+          + "Recovery - Back to normal conditions for:<div><ul>"
+          + clearedFlagsStr + "</ul></div><br>"
         if (exFlagsStr != null)
           emailStr= emailStr
-          + "Previously reported - Alarm conditions are still present for:\n"
-          + exFlagsStr + "\n\n"
+          + "Previously reported - Alarm conditions are still present for:<div><ul>"
+          + exFlagsStr + "</ul></div><br>"
         else if (newFlagsStr.isNull())
           emailStr= emailStr
           + "There are no remaining alarms."
@@ -322,7 +338,7 @@ src:
       
         // Send email and update records if successful
         try do
-          emailSend(email, emailSub, emailStr)
+          emailSend(email, emailSub, emailHeader+emailStr+emailFooter)
           readAll(emailAlarm and email==email)
           .each rec => commit(diff(rec, {emailSent:true, emailSentDateTime:now()}))
         end catch
@@ -337,6 +353,10 @@ src:
       Created.
     2024-09-09  Raphael Vitti
       Now using reminder description for existing alarms.
+    2024-11-14  Raphael Vitti
+      Updated email generation to use html and added links to configuration view, as well as optional
+      links configured under references tag. Modified 'updateGrid' so it contains all emailAlarms to
+      email, and configured a separate 'sendEmail' test to determine whether to send an email.
   --------------------------------------------------------------------------------------------------*/
 ---
 name:taskUpdateAlarms
@@ -409,6 +429,7 @@ src:
               else
                 alarmConfig.dis + " (Alarm cleared)",
             disReminder: alarmText + ", since " + today().format("WWW, YYYY-MMM-DD") + alarmDetails,
+            references: alarmConfig["references"],
             email: email,
             emailSent: false
           }
@@ -440,6 +461,8 @@ src:
       Removed default list of emails. Default behavior is now not to send any emails if list of emails
       is not configured in alarmConfig record.
       Moved analysis portion to a separate anAlarmPeriods func for easier testing.
+    2024-11-14  Raphael Vitti
+      Added optional 'references' tag to emailAlarm dict, copied from alarmConfig directly.
   --------------------------------------------------------------------------------------------------*/
 ---
 name:viAlarmConfig
