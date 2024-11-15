@@ -52,5 +52,4 @@ In case several formulas overlap, they all get calculated and the average of the
 ![Task view with example](./assets/hisFormula_task_example.jpg)
 
 # Dependencies
-Extension `tools` is required.
-
+Extension ![tools](../tools/) is required.
