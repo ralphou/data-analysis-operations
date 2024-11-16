@@ -24,8 +24,7 @@
 
 # Module: hisAlarm
 History-based alarms, for typical time scales ranging from 15 minutes to several days, with email notifications.
-Individual recipients can be configured for each alarm. Sends emails once per event, with reminders every 3 days,
-regardless of how often the required task (see below) is configured to run.
+Individual recipients can be configured for each alarm. Sends emails once per event, with reminders every 3 days.
 
 Alarms are triggered when the target trend, after applying the desired rollup, meets the configured condition for
 a given number of successive periods.
@@ -47,7 +46,8 @@ also available, tested with version 3.1.10.
 Requires configuring `Settings / Email` with an SMTP server and account.
 
 For automated alarming, a task needs to be configured to call `taskUpdateAlarms()` regularly, for example
-every 5 minutes.
+every 5 minutes. The frequency only dictates how often the conditions are checked, it does not affect the
+number of emails sent.
 
 ![Sample task screenshot](./assets/hisAlarm_task.jpg)
 
